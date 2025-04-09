@@ -2,6 +2,8 @@ _base_ = [
     '../_base_/default_runtime.py',
     # DAFormer Network Architecture
     '../_base_/models/daformer_sepaspp_mitb5.py',
+    # Se voglio modificare il DAFormer usare il seguente riga invece che la precedente
+    # '../_base_/models/daformer_sepaspp_resnet18.py',
     # GTA->Cityscapes Data Loading
     '../_base_/datasets/uda_cityscapes_day_to_dsec_night_512x512.py',
     # Basic UDA Self-Training
