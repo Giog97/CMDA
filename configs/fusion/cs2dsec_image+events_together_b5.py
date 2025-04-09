@@ -18,6 +18,7 @@ seed = 0
 pretrained_type = 'mit_b5'
 events_bins = 1
 train_type = 'cs2dsec_image+events_together'
+# Questo potrebbe essere il modello da dover modificare
 model = dict(
     type='FusionEncoderDecoder',
     pretrained='pretrained/{}.pth'.format(pretrained_type),

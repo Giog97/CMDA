@@ -2,7 +2,7 @@ import itertools
 import logging
 import math
 
-
+# Qui è dove viene presa la backbone
 def get_model_base(architecture, backbone):
     architecture = architecture.replace('sfa_', '')
     architecture = architecture.replace('_nodbn', '')
@@ -31,7 +31,7 @@ def get_model_base(architecture, backbone):
 
 def get_pretraining_file(backbone):
     if 'mitb5' in backbone:
-        return 'pretrained/mit_b5.pth'
+        return 'pretrained/mit_b5.pth' # qui stiamo dicendo di prendere mit_b5
     if 'mitb4' in backbone:
         return 'pretrained/mit_b4.pth'
     if 'mitb3' in backbone:
@@ -125,7 +125,8 @@ def generate_experiment_cfgs(id):
 
         # Setup model config
         architecture_mod = architecture
-        model_base = get_model_base(architecture_mod, backbone)
+        model_base = get_model_base(architecture_mod, backbone) # Qui viene presa la backbone
+        # Probabilmente è qui che dobbiamo modificare la backbone e l'architettura
         cfg['_base_'].append(model_base)
         cfg['model'] = {
             'pretrained': get_pretraining_file(backbone),
