@@ -21,9 +21,18 @@ train_type = 'cs2dsec_image+events_together'
 # Questo potrebbe essere il modello da dover modificare
 model = dict(
     type='FusionEncoderDecoder',
-    pretrained='pretrained/{}.pth'.format(pretrained_type),
-    backbone_image=dict(type=pretrained_type, style='pytorch', in_chans=3),
-    backbone_events=dict(type=pretrained_type, style='pytorch', in_chans=3),
+    # pretrained='pretrained/{}.pth'.format(pretrained_type),
+    pretrained=None,
+    #backbone_image=dict(type=pretrained_type, style='pytorch', in_chans=3), #originale
+    #backbone_events=dict(type=pretrained_type, style='pytorch', in_chans=3), #originale
+    backbone_image=dict(type='ResNetV1c', depth=18, num_stages=4, out_indices=(0, 1, 2, 3),
+                    dilations=(1, 1, 2, 4), strides=(1, 2, 2, 1),
+                    norm_cfg=dict(type='BN', requires_grad=True),
+                    norm_eval=False, style='pytorch'), #modificato
+    backbone_events=dict(type='ResNetV1c', depth=18, num_stages=4, out_indices=(0, 1, 2, 3),
+                     dilations=(1, 1, 2, 4), strides=(1, 2, 2, 1),
+                     norm_cfg=dict(type='BN', requires_grad=True),
+                     norm_eval=False, style='pytorch'), #modificato
     fusion_module=dict(type='AttentionAvgFusion'),
     fusion_isr_module=dict(type='AttentionFusion'),
     decode_head=dict(type='DAFormerHeadFusion',
@@ -94,8 +103,10 @@ evaluation = dict(interval=4000, metric='mIoU')  # 4000
 name = 'cs2dsec_image+events_b5'
 exp = 'basic'
 name_dataset = 'cityscapes_day2dsec_night'
-name_architecture = 'daformer_sepaspp_mitb5_events'
-name_encoder = 'mitb5'
+#name_architecture = 'daformer_sepaspp_mitb5_events' #originali
+#name_encoder = 'mitb5' #originali
+name_encoder = 'resnet18' #modificato
+name_architecture = 'daformer_sepaspp_resnet18' #modificato
 name_decoder = 'daformer_sepaspp_events'
 name_uda = 'dacs_a999_rcs0.01_cpl'
 name_opt = 'adamw_6e-05_pmTrue_poly10warm_1x2_40k'
