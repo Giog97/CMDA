@@ -211,7 +211,8 @@ def generate_experiment_cfgs(id):
     # -------------------------------------------------------------------------
     cfgs = []
     n_gpus = 1
-    batch_size = 2
+    #batch_size = 2 # Batch_size, probabilmente è qua che va modificato e messo a 1
+    batch_size = 1
     iters = 40000
     opt, lr, schedule, pmult = 'adamw', 0.00006, 'poly10warm', True
     crop = '512x512'
