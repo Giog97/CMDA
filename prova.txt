@@ -19,3 +19,9 @@ Ho aggiunto i branch. Il mio è MaryGio e il tuo è Gionni.
 
 -git reset --soft HEAD~1
 è il comando per eliminare l'ultimo commit
+
+Per allinearsi con il main:
+(partire dalla branch personale)
+         
+- git fetch origin               
+- git merge origin/main
