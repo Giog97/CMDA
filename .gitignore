@@ -2,3 +2,4 @@ pretrained/
 pretrained/
 *.pyc
 __pycache__/
+work_dirs/
