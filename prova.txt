@@ -3,3 +3,4 @@ Ho aggiunto i branch. Il mio è MaryGio e il tuo è Gionni.
 Per modificare solo la tua branch basta andare in nell'estensione laterale di VScode e cliccare su elementi 
 vicino alla dicitura grafo. A questo punto basta lasciare la spunta blu solo vicino al tuo nome. 
 Nel momento in cui vuoi caricare sul main, spunti quello e pushi.
+Adesso provo solo sul mio personale.
