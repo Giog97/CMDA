@@ -68,6 +68,8 @@ In that environment, the requirements can be installed with:
 ```shell
 pip install -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
 pip install mmcv-full==1.3.7  # requires the other packages to be installed first
+# Probabilmente il comando giusto per far partite l'installazione di mmcv-full è il seguente
+# pip install mmcv-full==1.3.7 -f https://download.openmmlab.com/mmcv/dist/cu110/torch1.7.0/index.html
 ```
 
 Further, please download the pretrained backbone `mit_b5.pth` 
