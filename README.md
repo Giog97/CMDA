@@ -186,12 +186,22 @@ CMDA
 ```shell
 python my_run_experiments.py --root_path /path_to_CMDA/CMDA/ --base_config configs/fusion/cs2dsec_image+events_together_b5.py --name cmda_cs2dsec
 ```
+Comando mod per lancio mit_b3 e train semplificato:
+```shell
+python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dsec_image+events_together_b3.py --name cmda_cs2dsecGM --backbone mit_b3   --batch_size 1
+```
+Si può modificare le dimensioni da lanciare aggiungendo: --train_size 400-400
 
 **Cityscapes→DarkZurich (Optional):** 
 
 ```shell
 python my_run_experiments.py --root_path /path_to_CMDA/CMDA/ --base_config configs/fusion/cs2dz_image+raw-isr_b5.py --name cmda_cs2dz
 ```
+Comando mod per lancio mit_b3 e train semplificato:
+```shell
+python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dz_image+raw-isr_b3.py   --backbone mit_b3   --batch_size 1   --name cmda_cs2dzGM
+```
+Si può modificare le dimensioni da lanciare aggiungendo: --train_size 400-400
 
 ## Testing & Predictions
 
@@ -207,6 +217,7 @@ on the DarkZurich testset using:
 
 ```shell
 python my_test.py --work_dir work_dirs/local-basic/230221_1646_cs2dz_image+raw-isr_SharedD_L07_C01_b5_896f6
+# Questo è da modificare con il nome del work_dirs/local-basic ottenuto durante il comando di train (credo)
 ```
 
 The predictions can be submitted to the public evaluation server of the
