@@ -170,6 +170,8 @@ class DAFormerHead(BaseDecodeHead):
 
     def forward(self, inputs):
         x = inputs
+        if x is None:
+            return None
         n, _, h, w = x[-1].shape
         # for f in x:
         #     mmcv.print_log(f'{f.shape}', 'mmseg')
@@ -262,7 +264,12 @@ class DAFormerHeadFusion(BaseDecodeHeadFusion):
 
     def forward_image(self, inputs):
         x = inputs
+        
+        if x is None:
+            return None
+
         n, _, h, w = x[-1].shape
+
         os_size = x[0].size()[2:]
         _c = {}
         for i in self.in_index:
@@ -276,6 +283,8 @@ class DAFormerHeadFusion(BaseDecodeHeadFusion):
 
     def forward_events(self, inputs):
         x = inputs
+        if x is None:
+            return None
         n, _, h, w = x[-1].shape
         os_size = x[0].size()[2:]
         _c = {}
@@ -290,6 +299,8 @@ class DAFormerHeadFusion(BaseDecodeHeadFusion):
 
     def forward_fusion(self, inputs):
         x = inputs
+        if x is None:
+            return None
         n, _, h, w = x[-1].shape
         os_size = x[0].size()[2:]
         _c = {}
@@ -302,22 +313,27 @@ class DAFormerHeadFusion(BaseDecodeHeadFusion):
         x = self.fuse_layer_fusion(torch.cat(list(_c.values()), dim=1))
         return x
 
-    def forward(self, inputs, cfg=None):
-        events_output, fusion_output, img_self_res_output = None, None, None
-        image_feat = self.forward_image(inputs['f_image'])
-        image_output = self.cls_seg(image_feat)
-        if 'f_events' in inputs.keys() and inputs['f_events'] is not None:
-            events_feat = self.forward_events(inputs['f_events'])
-            events_output = self.cls_seg_events(events_feat)
+    def forward(self, inputs, size=None, cfg=None):
+        image_feat = self.forward_image(inputs.get('f_image'))
+        events_feat = self.forward_events(inputs.get('f_events'))
+        fusion_feat = self.forward_fusion(inputs.get('f_fusion'))
+        img_self_res_feat = self.forward_events(inputs.get('f_img_self_res'))
 
-        if 'f_fusion' in inputs.keys() and inputs['f_fusion'] is not None:
-            fusion_feat = self.forward_fusion(inputs['f_fusion'])
-            fusion_output = self.cls_seg_fusion(fusion_feat)
+        image_output = self.cls_seg(image_feat) if image_feat is not None else None
+        # CORREZIONE: Usa i metodi di classificazione specifici
+        events_output = self.cls_seg_events(events_feat) if events_feat is not None else None
+        fusion_output = self.cls_seg_fusion(fusion_feat) if fusion_feat is not None else None
+        img_self_res_output = self.cls_seg_events(img_self_res_feat) if img_self_res_feat is not None else None
 
-        if 'f_img_self_res' in inputs.keys() and inputs['f_img_self_res'] is not None:
-            img_self_res_feat = self.forward_events(inputs['f_img_self_res'])
-            img_self_res_output = self.cls_seg_events(img_self_res_feat)
+        return {
+            'image_output': image_output,
+            'events_output': events_output,
+            'fusion_output': fusion_output,
+            'img_self_res_output': img_self_res_output
+        }
 
-        return {'image_output': image_output, 'events_output': events_output, 'fusion_output': fusion_output,
-                'img_self_res_output': img_self_res_output}
-
+    def forward_test(self, inputs, size=None, test_cfg=None):
+        """Wrapper for forward()."""
+        # Questo metodo semplicemente chiama la funzione forward principale,
+        # che è il comportamento standard atteso dal framework.
+        return self.forward(inputs, size=size, cfg=test_cfg)

@@ -16,7 +16,6 @@ seed = 0
 
 # Modifications to Basic model
 pretrained_type = 'mit_b5'
-# Questo potrebbe esser il modello da poter modificare
 model = dict(
     type='FusionEncoderDecoder',
     pretrained='pretrained/{}.pth'.format(pretrained_type),

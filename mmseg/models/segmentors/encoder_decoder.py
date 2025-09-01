@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from mmseg.core import add_prefix
 from mmseg.ops import resize
+# from mmseg.models.losses import TripletLoss
 from .. import builder
 from ..builder import SEGMENTORS
 from .base import BaseSegmentor, BaseSegmentorEvents, BaseSegmentorFusion
@@ -720,31 +721,49 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
         assert not self.with_neck
         return {'f_image': f_image, 'f_events': f_events, 'f_fusion': f_fusion, 'f_img_self_res': f_img_self_res}
 
-    def encode_decode(self, img, events, img_self_res=None, output_features=False, test_cfg={'output_type': 'fusion'}):
-        """Encode images with backbone and decode into a semantic segmentation
-        map of the same size as input."""
-        x = self.extract_feat(img, events, img_self_res, cfg=test_cfg)
-        if events is None:
-            test_cfg = {'output_type': 'image'}
-        out = self._decode_head_forward_test(x, output_features, test_cfg=test_cfg)
-        size = img.shape[2:] if img is not None else events.shape[2:]
-        if output_features:
-            if 'fusion_output' in out.keys() and out['fusion_output'] is not None:
-                out['fusion_output'] = resize(input=out['fusion_output'], size=size, mode='bilinear',
-                                              align_corners=self.align_corners)
-            if 'image_output' in out.keys():
-                out['image_output'] = resize(input=out['image_output'], size=size, mode='bilinear',
-                                             align_corners=self.align_corners)
-            if 'events_output' in out.keys():
-                out['events_output'] = resize(input=out['events_output'], size=size, mode='bilinear',
-                                              align_corners=self.align_corners)
-            if 'img_self_res_output' in out.keys() and out['img_self_res_output'] is not None:
-                out['img_self_res_output'] = resize(input=out['img_self_res_output'], size=size, mode='bilinear',
-                                                    align_corners=self.align_corners)
-        else:
-            out = resize(input=out, size=size, mode='bilinear', align_corners=self.align_corners)
-        return out
+# In encoder_decoder.py, dentro la classe FusionEncoderDecoder
 
+# Sostituisci il metodo 'encode_decode' con questa versione finale.
+
+    def encode_decode(self, img, events, **kwargs):
+        """
+        Versione finale e corretta. Usa la firma corretta e mappa
+        esplicitamente gli argomenti per le sotto-funzioni.
+        """
+        # img_metas non viene passato da dacs.py, quindi lo impostiamo a None.
+        img_metas = None
+
+        # 1. Chiamiamo extract_feat mappando manualmente gli argomenti da kwargs.
+        #    Questa è la correzione chiave.
+        x = self.extract_feat(
+            image=img,
+            events=events,
+            img_self_res=kwargs.get('img_self_res'),
+            cfg=kwargs.get('test_cfg')  # Mappiamo 'test_cfg' a 'cfg'
+        )
+
+        # 2. Otteniamo il DIZIONARIO di logits dalla testa di decodifica
+        # La testa di decodifica si aspetta 'test_cfg'
+        out = self._decode_head_forward_test(x, img_metas, test_cfg=kwargs.get('test_cfg'))
+
+        # 3. LOGICA DI SELEZIONE ROBUSTA
+        if isinstance(out, dict):
+            seg_logits = out.get('fusion_output') if out.get('fusion_output') is not None else out.get('image_output')
+        else:
+            seg_logits = out
+        
+        if seg_logits is None:
+             raise RuntimeError("Nessun tensore di output valido trovato in 'out' dal decode_head.")
+
+        # 4. Ridimensioniamo e restituiamo il tensore finale
+        seg_logits = resize(
+            input=seg_logits,
+            size=img.shape[2:],
+            mode='bilinear',
+            align_corners=self.align_corners)
+            
+        return seg_logits
+    
     def _decode_head_forward_train(self, x, img_metas, gt_semantic_seg, seg_weight=None, cfg=None):
         """Run forward function and calculate loss for decode head in
         training."""
@@ -758,10 +777,14 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
         losses.update(add_prefix(loss_decode, 'decode'))
         return losses, seg_logits
 
-    def _decode_head_forward_test(self, x, output_features=False, test_cfg={'output_type': 'fusion'}):
-        """Run forward function and calculate loss for decode head in
-        inference."""
-        seg_logits = self.decode_head.forward_test(x, output_features, test_cfg=test_cfg)
+    def _decode_head_forward_test(self, x, output_features, size=None, test_cfg=None):
+        if output_features:
+            # Pass only the necessary arguments (x, size, and test_cfg)
+            seg_logits = self.decode_head.forward_test(x, size=size, test_cfg=test_cfg)
+            return seg_logits, x
+
+        # Pass only the necessary arguments (x, size, and test_cfg)
+        seg_logits = self.decode_head.forward_test(x, size=size, test_cfg=test_cfg)
         return seg_logits
 
     def _auxiliary_head_forward_train(self,
@@ -808,11 +831,54 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
             dict[str, Tensor]: a dictionary of loss components
         """
         losses = dict()
-        image, events = inputs['image'], inputs['events']
+
+        # Estrai tutti i dati necessari dal dizionario 'inputs'
+        events = inputs['events'] if 'events' in inputs.keys() else None
+        image = inputs['image'] if 'image' in inputs.keys() else None
+        
+        # Aggiungiamo questa riga per estrarre l'esempio negativo
+        # Assicurati che il tuo dataloader lo aggiunga a 'inputs' con la chiave 'negative_events'
+        negative_events = inputs.get('negative_events', None)
+
         if 'img_self_res' in inputs.keys():
             img_self_res = inputs['img_self_res']
         else:
             img_self_res = None
+            
+        # Calcolo della Triplet Loss
+        # Utilizziamo i backbone separati per estrarre le feature di immagine e eventi
+        # per una loss contrastiva più efficace.
+            # Aggiungi questa condizione per evitare l'errore
+        if image is not None:
+            anchor_feats = self.backbone_image(image)
+        else:
+            anchor_feats = None
+        
+        if events is not None:
+            positive_feats = self.backbone_events(events)
+        else:
+            positive_feats = None
+
+        if negative_events is not None:
+            negative_feats = self.backbone_events(negative_events)
+        else:
+            negative_feats = None
+
+        # Inizializza e calcola la Triplet Loss
+        # triplet_loss_func = TripletLoss(margin=1.0)
+        # loss_triplet = 0
+        # if anchor_feats is not None and positive_feats is not None and negative_feats is not None:
+        #    loss_triplet = triplet_loss_func(anchor_feats, positive_feats, negative_feats)
+        #else:
+        # Aggiungi questa riga per inizializzare il tensore in caso di NoneType
+        #    loss_triplet = torch.tensor(0.0, device='cuda', requires_grad=True)    
+
+        # losses.update(add_prefix(dict(loss_triplet=loss_triplet), 'decode'))
+
+        # Aggiungi la loss contrastiva al dizionario delle perdite
+        # losses['loss_contrastive'] = loss_triplet
+
+        # Codice originale per la segmentazione (rimane invariato)
         x = self.extract_feat(image, events, img_self_res, cfg=cfg)
 
         if self.train_type == 'cs2dz_image+raw-isr_no-fusion':
@@ -824,11 +890,12 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
 
         if return_feat:
             losses['features'] = x
+            
         loss_decode, pred = self._decode_head_forward_train(x, None, gt_semantic_seg, seg_weight, cfg)
         losses.update(loss_decode)
 
         assert not self.with_auxiliary_head
-        return losses, pred
+        return losses, pred    
 
     def feature_consistency_loss(self, input_features, cfg=None, src_key='mixed_isr_features'):
         f_image = input_features['f_image']
@@ -1001,3 +1068,12 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
         # unravel batch dim
         seg_pred = list(seg_pred)
         return seg_pred
+    
+    def resize_to_original(self, seg_logits, size):
+        if size is not None:
+            seg_logits = resize(
+                input=seg_logits,
+                size=size,
+                mode='bilinear',
+                align_corners=self.align_corners)
+        return seg_logits

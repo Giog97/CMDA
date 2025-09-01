@@ -283,41 +283,78 @@ class DSECDataset(Dataset):
             label = label[:440, :]
             output['label'] = label
 
-        if 'events_vg' in self.outputs:
-            self.events_h5 = h5py.File(events_h5_path, 'r')
-            if self.rectify_events:
-                rectify_map_path = image_path.replace('images', 'events')[:-20] + 'rectify_map.h5'
-                rectify_map = h5py.File(rectify_map_path, 'r')
-                self.rectify_map = np.asarray(rectify_map['rectify_map'])
-            images_to_events_index = np.loadtxt(image_path.split('left/rectified')[0] + 'images_to_events_index.txt',
-                                                dtype=str, encoding='utf-8')
-            events_vg = torch.zeros((self.output_num, self.events_bins, self.events_height, self.events_width))
-            for i in range(self.output_num):
-                events_finish_index = int(images_to_events_index[now_image_index - i])
-                if self.events_num != -1:
-                    events_start_index = events_finish_index - self.events_num + 1
-                else:
-                    events_start_index = int(images_to_events_index[now_image_index - self.image_change_range - i])
-                if events_start_index > events_finish_index:
-                    return None
-                events_vg[self.output_num - 1 - i, :] = self.get_events_vg(events_finish_index, events_start_index)
-            if self.events_bins_5_avg_1:
-                events_vg = torch.mean(events_vg, dim=1, keepdim=True)
-            if self.output_num == 1:
-                events_vg = events_vg[0]
+        # ###############################################################
+        # LOGICA CORRETTA PER CARICARE EVENTI POSITIVI E NEGATIVI
+        # ###############################################################
+        if 'events_vg' in self.outputs or 'negative_events' in self.outputs:
+            # Apriamo il file H5 per l'evento POSITIVO (corrente)
+            events_h5 = h5py.File(events_h5_path, 'r')
+            images_to_events_index = np.loadtxt(
+                image_path.split('left/rectified')[0] + 'images_to_events_index.txt',
+                dtype=str, encoding='utf-8')
+            events_finish_index = int(images_to_events_index[now_image_index])
+            if self.events_num != -1:
+                events_start_index = events_finish_index - self.events_num + 1
+            else:
+                events_start_index = int(images_to_events_index[now_image_index - self.image_change_range])
 
-            if 'label' not in self.outputs:  # do Data Augmentation
-                events_vg = events_vg[:, y: y + self.crop_size[1], x: x + self.crop_size[0]]
-                if flip_flag:
-                    events_vg = self.HorizontalFlip(events_vg)
-                height_weight = (self.after_crop_resize_size[1], self.after_crop_resize_size[0])
-                events_vg = F.interpolate(events_vg[None], size=height_weight, mode='bilinear',
-                                          align_corners=False)[0]
-            else:  # test mode
-                events_vg = events_vg[:, :440, :]
-            if self.enforce_3_channels:
-                events_vg = events_vg.repeat(3, 1, 1)
-            output['events_vg'] = events_vg
+            # --- CARICAMENTO DEL CAMPIONE POSITIVO ---
+            if 'events_vg' in self.outputs:
+                events_vg = self.get_events_vg_from_file(events_h5, events_finish_index, events_start_index, image_path)
+
+                if 'label' not in self.outputs: # Applica data augmentation
+                    events_vg = events_vg[:, y: y + self.crop_size[1], x: x + self.crop_size[0]]
+                    if flip_flag:
+                        events_vg = self.HorizontalFlip(events_vg)
+                    height_weight = (self.after_crop_resize_size[1], self.after_crop_resize_size[0])
+                    events_vg = F.interpolate(events_vg[None], size=height_weight, mode='bilinear', align_corners=False)[0]
+                else: # Modalità test
+                    events_vg = events_vg[:, :440, :]
+
+                if self.enforce_3_channels and events_vg.shape[0] == 1:
+                    events_vg = events_vg.repeat(3, 1, 1)
+                
+                output['events_vg'] = events_vg
+            
+            # Chiudiamo il file H5 positivo
+            events_h5.close()
+
+            # --- CARICAMENTO DEL CAMPIONE NEGATIVO ---
+            if 'negative_events' in self.outputs:
+                neg_idx = idx
+                while neg_idx == idx:
+                    neg_idx = random.randint(0, len(self) - 1)
+                
+                neg_image_path = self.dataset_txt[neg_idx][0]
+                neg_events_h5_path = neg_image_path.replace('images', 'events')[:-20] + 'events.h5'
+                neg_now_image_index = int(neg_image_path.split('/')[-1].split('.')[0])
+                
+                neg_events_h5 = h5py.File(neg_events_h5_path, 'r')
+                neg_images_to_events_index = np.loadtxt(
+                    neg_image_path.split('left/rectified')[0] + 'images_to_events_index.txt',
+                    dtype=str, encoding='utf-8')
+                neg_events_finish_index = int(neg_images_to_events_index[neg_now_image_index])
+                if self.events_num != -1:
+                    neg_events_start_index = neg_events_finish_index - self.events_num + 1
+                else:
+                    neg_events_start_index = int(neg_images_to_events_index[neg_now_image_index - self.image_change_range])
+
+                negative_events_vg = self.get_events_vg_from_file(neg_events_h5, neg_events_finish_index, neg_events_start_index, neg_image_path)
+                
+                if 'label' not in self.outputs: # Applica la stessa data augmentation del positivo
+                    negative_events_vg = negative_events_vg[:, y: y + self.crop_size[1], x: x + self.crop_size[0]]
+                    if flip_flag:
+                        negative_events_vg = self.HorizontalFlip(negative_events_vg)
+                    height_weight = (self.after_crop_resize_size[1], self.after_crop_resize_size[0])
+                    negative_events_vg = F.interpolate(negative_events_vg[None], size=height_weight, mode='bilinear', align_corners=False)[0]
+                else:
+                    negative_events_vg = negative_events_vg[:, :440, :]
+            
+                if self.enforce_3_channels and negative_events_vg.shape[0] == 1:
+                    negative_events_vg = negative_events_vg.repeat(3, 1, 1)
+
+                output['negative_events'] = negative_events_vg # Usa la chiave corretta
+                neg_events_h5.close()
 
         if 'img_metas' in self.outputs:
             output['img_metas'] = dict()
@@ -338,32 +375,42 @@ class DSECDataset(Dataset):
 
         return output
 
-    def get_events_vg(self, events_finish_index, events_start_index):
-        events_t = np.asarray(self.events_h5['events/{}'.format('t')][events_start_index: events_finish_index + 1])
-        events_x = np.asarray(self.events_h5['events/{}'.format('x')][events_start_index: events_finish_index + 1])
-        events_y = np.asarray(self.events_h5['events/{}'.format('y')][events_start_index: events_finish_index + 1])
-        events_p = np.asarray(self.events_h5['events/{}'.format('p')][events_start_index: events_finish_index + 1])
-
+    def get_events_vg_from_file(self, events_h5, events_finish_index, events_start_index, image_path):
+        events_t = np.asarray(events_h5['events/{}'.format('t')][events_start_index: events_finish_index + 1])
+        events_x = np.asarray(events_h5['events/{}'.format('x')][events_start_index: events_finish_index + 1])
+        events_y = np.asarray(events_h5['events/{}'.format('y')][events_start_index: events_finish_index + 1])
+        events_p = np.asarray(events_h5['events/{}'.format('p')][events_start_index: events_finish_index + 1])
+    
         events_t = (events_t - events_t[0]).astype('float32')
         events_t = torch.from_numpy((events_t / events_t[-1]))
         events_p = torch.from_numpy(events_p.astype('float32'))
+    
+        # Riutilizziamo la mappa di rettifica esistente
+        rectify_map_path = image_path.replace('images', 'events')[:-20] + 'rectify_map.h5'
+        rectify_map = h5py.File(rectify_map_path, 'r')
+        self.rectify_map = np.asarray(rectify_map['rectify_map'])
+        rectify_map.close()
+
         if self.rectify_events:
             xy_rect = self.rectify_map[events_y, events_x]
             events_x = xy_rect[:, 0]
             events_y = xy_rect[:, 1]
+    
         events_x = torch.from_numpy(events_x.astype('float32'))
         events_y = torch.from_numpy(events_y.astype('float32'))
         events_vg = events_to_voxel_grid(events_t, events_x, events_y, events_p, self.events_width, self.events_height,
-                                         num_bins=self.events_bins, normalize_flag=False)
+                                        num_bins=self.events_bins, normalize_flag=False)
 
         if self.events_clip_range is not None:
             events_clip_range = random.uniform(self.events_clip_range[0], self.events_clip_range[1])
         else:
             events_clip_range = (events_finish_index - events_start_index) / 500000 * 1.5
-            # events_clip_range = 'auto'
-        # print('events_clip_range: {}'.format(events_clip_range))
         events_vg = events_norm(events_vg, clip_range=events_clip_range, final_range=1.0, enforce_no_events_zero=True)
         return events_vg
+
+# E modifichiamo la funzione `get_events_vg` per utilizzare la nuova funzione
+    def get_events_vg(self, events_finish_index, events_start_index):
+        return self.get_events_vg_from_file(self.events_h5, events_finish_index, events_start_index, self.dataset_txt[0][0])
 
     def get_gt_seg_maps(self, efficient_test=False):
         """Get ground truth segmentation maps for evaluation."""

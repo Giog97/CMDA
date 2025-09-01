@@ -185,12 +185,17 @@ CMDA
 
 ```shell
 python my_run_experiments.py --root_path /path_to_CMDA/CMDA/ --base_config configs/fusion/cs2dsec_image+events_together_b5.py --name cmda_cs2dsec
+
+python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dsec_image+events_together_b3.py --name cmda_cs2dsec
 ```
+
 
 **Cityscapes→DarkZurich (Optional):** 
 
 ```shell
 python my_run_experiments.py --root_path /path_to_CMDA/CMDA/ --base_config configs/fusion/cs2dz_image+raw-isr_b5.py --name cmda_cs2dz
+
+python my_run_experiments.py --root_path /path_to_CMDA/CMDA/ --base_config configs/fusion/cs2dz_image+raw-isr_b3.py --name cmda_cs2dz
 ```
 
 ## Testing & Predictions

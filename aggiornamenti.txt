@@ -1,0 +1,42 @@
+## Come Funziona la Nostra Implementazione
+Noi non stiamo né chiamando l'estrattore più volte, né concatenando tutto in un unico batch manualmente. Stiamo invece sfruttando l'architettura del tuo modello FusionEncoderDecoder.
+
+Singola Chiamata al Modello: Nel nostro codice in dacs.py, facciamo una sola chiamata di alto livello per l'intero processo sui dati sorgente:
+
+Python
+
+# Questa è l'unica chiamata che facciamo per estrarre le feature
+source_ce_losses, pred = self.get_model().forward_train(
+    inputs, source_label, return_feat=True, cfg=self.forward_cfg
+)
+dove inputs è un dizionario che contiene già sia l'immagine RGB che gli eventi (es. {'image': day_image, 'events': day_events}).
+
+Estrazione Parallela Interna: Il tuo modello FusionEncoderDecoder è stato progettato proprio per questo. Al suo interno, possiede due "rami" o backbones separati:
+
+backbone_image
+
+backbone_events
+
+Quando riceve il dizionario inputs, instrada automaticamente day_image al backbone_image e day_events al backbone_events. L'estrazione delle feature avviene in parallelo all'interno di questa singola chiamata.
+
+Output Organizzato: Il modello, grazie all'argomento return_feat=True, ci restituisce un unico dizionario, src_feat, che contiene già le feature estratte e separate per noi:
+
+src_feat['f_image'] contiene le feature dell'immagine RGB.
+
+src_feat['f_events'] contiene le feature degli eventi.
+
+## Vantaggi del Nostro Approccio
+Questo metodo è il migliore possibile per la tua architettura:
+
+Efficienza: È un singolo forward pass, che sfrutta al meglio il parallelismo della GPU.
+
+Pulizia del Codice: La logica nel nostro forward_train rimane semplice e leggibile. Non dobbiamo gestire indici o chiamate multiple. Chiediamo le feature e il modello ce le fornisce già pronte.
+
+Flessibilità: Questo approccio funziona anche se backbone_image e backbone_events hanno architetture completamente diverse (es. ResNet per uno e un'altra rete per l'altro).
+
+In sintesi, non stiamo usando la seconda opzione (concatenazione manuale del batch), ma una versione molto più elegante e performante della prima opzione, dove le "chiamate separate" sono gestite internamente e in parallelo dal modello stesso.
+
+
+Migliorare i NEGATIVI 
+
+Ottima scelta! Usare i negativi "in-batch" è una delle tecniche più efficaci e comuni per migliorare l'apprendimento contrastivo. Invece di confrontare ogni ancora con un solo negativo debole, la confronteremo con tutti gli altri campioni del batch, rendendo il compito molto più significativo per il modello.

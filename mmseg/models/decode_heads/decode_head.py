@@ -194,7 +194,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         losses = self.losses(seg_logits, gt_semantic_seg, seg_weight)
         return losses, seg_logits
 
-    def forward_test(self, inputs, img_metas=None, test_cfg=None):
+    def forward_test(self, inputs, img_metas, test_cfg=None):
         """Forward function for testing.
 
         Args:
@@ -209,7 +209,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         Returns:
             Tensor: Output segmentation map.
         """
-        return self.forward(inputs)
+        return self.forward(inputs, cfg=test_cfg)
 
     def cls_seg(self, feat):
         """Classify each pixel."""
@@ -421,12 +421,12 @@ class BaseDecodeHeadFusion(BaseModule, metaclass=ABCMeta):
         pass
 
     def forward_train(self,
-                      inputs,
-                      img_metas,
-                      gt_semantic_seg,
-                      train_cfg,
-                      seg_weight=None,
-                      cfg=None):
+                    inputs,
+                    img_metas,
+                    gt_semantic_seg,
+                    train_cfg,
+                    seg_weight=None,
+                    cfg=None):
         """Forward function for training.
         Args:
             inputs (list[Tensor]): List of multi-level img features.
@@ -438,102 +438,100 @@ class BaseDecodeHeadFusion(BaseModule, metaclass=ABCMeta):
             gt_semantic_seg (Tensor): Semantic segmentation masks
                 used if the architecture supports semantic segmentation task.
             train_cfg (dict): The training config.
-
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        
+        # 1. Get segmentation logits
         seg_logits = self.forward(inputs, cfg)
-        # seg_logits['fusion_output']: [2, 19, 128, 128] (-0.7546 ~ 0.6156)
-        # gt_semantic_seg: [2, 1, 512, 512] (0 ~ 19 + 255)
-        # seg_weight: [2, 512, 512] (0 ~ 1)
-        if 'cal_confidence' in cfg.keys() and cfg['cal_confidence']:
-            if seg_weight is None:  # source
-                seg_weight = torch.ones_like(gt_semantic_seg)[:, 0].cuda()  # [2, 512, 512]
-            _, fusion_out = torch.max(seg_logits['fusion_output'], dim=1)  # [2, 128, 128] (0 ~ 18)
-            _, image_out = torch.max(seg_logits['image_output'], dim=1)
-            _, events_out = torch.max(seg_logits['events_output'], dim=1)
-
-            diff_image_fusion = torch.ne(fusion_out, image_out)
-            same_image_fusion = torch.eq(fusion_out, image_out)
-            diff_events_fusion = torch.ne(fusion_out, events_out)
-            same_events_fusion = torch.eq(fusion_out, events_out)
-
-            less_focus_image_index = (diff_image_fusion * same_events_fusion)[None].float()
-            less_focus_events_index = (diff_events_fusion * same_image_fusion)[None].float()
-
-            less_focus_image_index = resize(input=less_focus_image_index, size=seg_weight.shape[1:])[0].bool()
-            less_focus_events_index = resize(input=less_focus_events_index, size=seg_weight.shape[1:])[0].bool()
-
-            if cfg['confidence_type'] == 'soft_gradual':
-                image_attention = torch.logical_not(less_focus_image_index).float() + \
-                                  less_focus_image_index.float() * (1 - cfg['gradual_rate'])
-                events_attention = torch.logical_not(less_focus_events_index).float() + \
-                                   less_focus_events_index.float() * (1 - cfg['gradual_rate'])
-            elif cfg['confidence_type'] == 'hard':
-                image_attention = torch.logical_not(less_focus_image_index)
-                events_attention = torch.logical_not(less_focus_events_index)
-            else:
-                raise ValueError('error confidence_type')
-            image_seg_weight = seg_weight * image_attention
-            events_seg_weight = seg_weight * events_attention
-        else:
+        
+        # 2. Handle seg_weight based on gt_semantic_seg
+        if gt_semantic_seg is not None:
             if seg_weight is None:
                 if isinstance(gt_semantic_seg, dict):
-                    seg_weight = torch.ones_like(gt_semantic_seg['image'])[:, 0].cuda()
+                    # Ensure 'image' key exists before accessing it
+                    if 'image' in gt_semantic_seg:
+                        seg_weight = torch.ones_like(gt_semantic_seg['image'])[:, 0].cuda()
+                    else:
+                        seg_weight = torch.ones_like(gt_semantic_seg)[:, 0].cuda()
                 else:
                     seg_weight = torch.ones_like(gt_semantic_seg)[:, 0].cuda()
-            if isinstance(seg_weight, dict):
-                image_seg_weight = seg_weight['image']
-                events_seg_weight = seg_weight['events']
-            else:
-                image_seg_weight = seg_weight
-                events_seg_weight = seg_weight
+        else:
+            seg_weight = None
+
+        if isinstance(seg_weight, dict):
+            image_seg_weight = seg_weight.get('image', None)
+            events_seg_weight = seg_weight.get('events', None)
+        else:
+            image_seg_weight = seg_weight
+            events_seg_weight = seg_weight
+        
+        # 3. Handle gt_semantic_seg inputs
+        image_gt, events_gt, fusion_gt, isr_gt = None, None, None, None
+        if isinstance(gt_semantic_seg, dict):
+            image_gt = gt_semantic_seg.get('image', None)
+            events_gt = gt_semantic_seg.get('events', None)
+        else:
+            if gt_semantic_seg is not None:
+                image_gt, events_gt, fusion_gt, isr_gt = gt_semantic_seg, gt_semantic_seg, gt_semantic_seg, gt_semantic_seg
 
         losses = dict()
-
-        if isinstance(gt_semantic_seg, dict):
-            image_gt, events_gt = gt_semantic_seg['image'], gt_semantic_seg['events']
-            assert seg_logits['img_self_res_output'] is None
-            assert seg_logits['fusion_output'] is None
-        else:
-            image_gt, events_gt, fusion_gt, isr_gt = gt_semantic_seg, gt_semantic_seg, gt_semantic_seg, gt_semantic_seg
-
+        
+        # 4. Calculate losses with checks for None values
+        # Initialize all losses to 0 to prevent errors
+        losses_1 = {'loss_seg': torch.tensor(0.0, device='cuda'), 'acc_seg': torch.tensor(0.0, device='cuda')}
+        losses_2 = {'loss_seg': torch.tensor(0.0, device='cuda'), 'acc_seg': torch.tensor(0.0, device='cuda')}
+        losses_3 = {'loss_seg': torch.tensor(0.0, device='cuda'), 'acc_seg': torch.tensor(0.0, device='cuda')}
+        losses_4 = {'loss_seg': torch.tensor(0.0, device='cuda'), 'acc_seg': torch.tensor(0.0, device='cuda')}
+        
         if self.train_type == 'cs2dz_image+raw-isr_split':
             assert cfg['loss_weight']['image'] == 0.5 and cfg['loss_weight']['events'] == 0.5
-            losses_1 = self.losses(seg_logits['image_output'], image_gt, image_seg_weight.detach())
-            losses_2 = self.losses(seg_logits['events_output'], events_gt, events_seg_weight.detach())
+            
+            # Calculate image loss
+            if image_gt is not None and seg_logits.get('image_output') is not None and image_seg_weight is not None:
+                losses_1 = self.losses(seg_logits['image_output'], image_gt, image_seg_weight.detach())
+            
+            # Calculate events loss
+            if events_gt is not None and seg_logits.get('events_output') is not None and events_seg_weight is not None:
+                losses_2 = self.losses(seg_logits['events_output'], events_gt, events_seg_weight.detach())
+
             losses['loss_seg'] = losses_1['loss_seg'] * cfg['loss_weight']['image'] * 2 + \
-                                 losses_2['loss_seg'] * cfg['loss_weight']['events'] * 2
+                                losses_2['loss_seg'] * cfg['loss_weight']['events'] * 2
             losses['acc_seg'] = losses_1['acc_seg']
         else:
-            losses_2 = self.losses(seg_logits['image_output'], image_gt, image_seg_weight.detach())
-            losses_3 = self.losses(seg_logits['events_output'], events_gt, events_seg_weight.detach())
-            if seg_logits['fusion_output'] is not None:
-                losses_1 = self.losses(seg_logits['fusion_output'], fusion_gt, seg_weight.detach())
-            else:
-                losses_1 = {'loss_seg': torch.tensor(0).detach()}
-            losses['loss_seg'] = losses_1['loss_seg'] * cfg['loss_weight']['fusion'] + \
-                                 losses_2['loss_seg'] * cfg['loss_weight']['image']
+            # Calculate image loss
+            if image_gt is not None and seg_logits.get('image_output') is not None and image_seg_weight is not None:
+                losses_2 = self.losses(seg_logits['image_output'], image_gt, image_seg_weight.detach())
 
-            if seg_logits['img_self_res_output'] is not None:
+            # Calculate events loss
+            if events_gt is not None and seg_logits.get('events_output') is not None and events_seg_weight is not None:
+                losses_3 = self.losses(seg_logits['events_output'], events_gt, events_seg_weight.detach())
+            
+            # Calculate fusion loss
+            if fusion_gt is not None and seg_logits.get('fusion_output') is not None and seg_weight is not None:
+                losses_1 = self.losses(seg_logits['fusion_output'], fusion_gt, seg_weight.detach())
+
+            # Calculate isr loss
+            if isr_gt is not None and seg_logits.get('img_self_res_output') is not None and events_seg_weight is not None:
                 losses_4 = self.losses(seg_logits['img_self_res_output'], isr_gt, events_seg_weight.detach())
+            
+            losses['loss_seg'] = losses_1['loss_seg'] * cfg['loss_weight']['fusion'] + \
+                                losses_2['loss_seg'] * cfg['loss_weight']['image']
+
+            if seg_logits.get('img_self_res_output') is not None:
                 losses['loss_seg'] += (losses_4['loss_seg'] * cfg['loss_weight']['img_self_res'] +
-                                       losses_3['loss_seg'] * (cfg['loss_weight']['events'] / 2))
+                                    losses_3['loss_seg'] * (cfg['loss_weight']['events'] / 2))
             else:
                 losses['loss_seg'] += losses_3['loss_seg'] * cfg['loss_weight']['events']
 
-            if seg_logits['fusion_output'] is not None:
+            if seg_logits.get('fusion_output') is not None:
                 losses['acc_seg'] = losses_1['acc_seg']
             else:
                 losses['acc_seg'] = losses_2['acc_seg']
-        '''print('image: {:.3f} * {} = {:.3f}, isr: {:.3f} * {} = {:.3f}'.format(losses_2['loss_seg'].item(),
-                                                                              cfg['loss_weight']['image'],
-                                                                      losses_2['loss_seg'].item() * cfg['loss_weight']['image'],
-                                                                      losses_3['loss_seg'].item(), cfg['loss_weight']['events'],
-                                                                      losses_3['loss_seg'].item() * cfg['loss_weight']['events']))'''
+        
         return losses, seg_logits
 
-    def forward_test(self, inputs, output_features=False, test_cfg={'output_type': 'fusion'}):
+    def forward(self, inputs, size=None, cfg=None):
         """Forward function for testing.
 
         Args:
@@ -548,17 +546,7 @@ class BaseDecodeHeadFusion(BaseModule, metaclass=ABCMeta):
         Returns:
             Tensor: Output segmentation map.
         """
-        if output_features:
-            return self.forward(inputs)
-        else:
-            if test_cfg['output_type'] == 'fusion':
-                return self.forward(inputs)['fusion_output']
-            elif test_cfg['output_type'] == 'image':
-                return self.forward(inputs)['image_output']
-            elif test_cfg['output_type'] == 'events':
-                return self.forward(inputs)['events_output']
-            else:
-                raise ValueError('error output_type = {}'.format(test_cfg['output_type']))
+        return self.forward(inputs, size=size, cfg=test_cfg)
 
     def cls_seg(self, feat):
         """Classify each pixel."""

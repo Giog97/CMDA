@@ -1,0 +1,116 @@
+{
+    "_base_": "../../fusion/cs2dz_image+raw-isr_b3.py",
+    "name": "250429_1532_cmda_cs2dz_945c3",
+    "work_dir": "work_dirs/local-basic/250429_1532_cmda_cs2dz_945c3",
+    "git_rev": "7ba28311872c901d2278340e556349a7d8838046",
+    "model": {
+        "pretrained": "pretrained/mit_b3.pth",
+        "backbone_image": {
+            "type": "mit_b3"
+        },
+        "backbone_events": {
+            "type": "mit_b3"
+        },
+        "fusion_module": {
+            "type": "AttentionFusion"
+        },
+        "fusion_isr_module": {
+            "type": ""
+        },
+        "decode_head": {
+            "decoder_params": {
+                "share_decoder": true,
+                "half_share_decoder": false
+            }
+        }
+    },
+    "uda": {
+        "debug_img_interval": 500,
+        "cyclegan_itrd2en_path": "",
+        "pseudo_weight_ignore_top": 15,
+        "pseudo_weight_ignore_bottom": 120,
+        "imnet_feature_dist_lambda": 0,
+        "isr_mix_aug": false,
+        "sky_mask": null,
+        "deflare_aug": false,
+        "isr_edge": false,
+        "lambda_isr_features": -1,
+        "isr_edge_class_weight": -1,
+        "mixed_image_to_mixed_isr": true,
+        "isr_noise_dacs_type": "",
+        "shift_3_channel": false,
+        "isr_parms": {
+            "val_range": [
+                1,
+                100
+            ],
+            "_threshold": 0.01,
+            "_clip_range": 0.1,
+            "shift_pixel": 3
+        },
+        "isr_no_fusion": false,
+        "lambda_feature_consistency": -1,
+        "isr_another_fusion": false,
+        "random_choice_thres": "",
+        "shift_type": "rightdown",
+        "without_events": false,
+        "without_isd": false,
+        "fuse_both_ice_and_e": false,
+        "forward_cfg": {
+            "loss_weight": {
+                "image": 0.7,
+                "events": 0.7,
+                "fusion": 0.7,
+                "img_self_res": 0.25
+            }
+        }
+    },
+    "evaluation": {
+        "interval": 4000
+    },
+    "data": {
+        "samples_per_gpu": 1,
+        "train": {
+            "source": {
+                "dataset_path": "./data/cityscapes/",
+                "isr_noise": false,
+                "isr_cow_mask": false,
+                "high_resolution_isr": false,
+                "random_flare": null,
+                "cs_isr_data_type": "day",
+                "shift_3_channel": false,
+                "isr_parms": "",
+                "shift_type": "rightdown"
+            },
+            "target": {
+                "dataset_path": "./data/dark_zurich/",
+                "auto_threshold": false,
+                "high_resolution_isr": false,
+                "outputs": [
+                    "image",
+                    "night_isr"
+                ],
+                "shift_3_channel": false,
+                "dz_isr_data_type": "night",
+                "isr_parms": {
+                    "val_range": [
+                        1,
+                        100
+                    ],
+                    "_threshold": 0.01,
+                    "_clip_range": 0.1,
+                    "shift_pixel": 3
+                },
+                "shift_type": "rightdown"
+            },
+            "source_json_root": "./data/cityscapes/"
+        },
+        "val": {
+            "dataset_path": "./data/dark_zurich/"
+        },
+        "test": {
+            "dataset_path": "./data/dark_zurich/"
+        }
+    },
+    "seed": 0
+}

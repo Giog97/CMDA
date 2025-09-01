@@ -72,6 +72,7 @@ def main(args):
     args = parse_args(args)
 
     cfg = Config.fromfile(args.config)
+    
     if args.options is not None:
         cfg.merge_from_dict(args.options)
     # set cudnn_benchmark
