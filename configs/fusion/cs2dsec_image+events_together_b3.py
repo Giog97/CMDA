@@ -51,6 +51,9 @@ uda = dict(
     enable_contrastive=True,
     #contrastive_lambda=0.1,  # Puoi iniziare con questo valore e poi sintonizzarlo
     contrastive_lambda=0.5,
+
+    update_interval=4,  # <-- AGGIUNGI QUESTA RIGA (4 è un esempio)
+
     contrastive_temperature=0.07,
     cyclegan_itrd2en_path='./pretrained/cityscapes_ICD_to_dsec_EN.pth',
     img_self_res_reg='no',  # no, only_isr, mixed
@@ -92,7 +95,14 @@ data = dict(
     test=dict(events_bins=events_bins))
 
 # Optimizer Hyperparameters
-optimizer_config = None
+
+# optimizer_config = None
+
+# optimizer_config = dict(
+#    type='GradientCumulativeOptimizerHook', # Specifichiamo l'hook corretto
+#    cumulative_iters=4                      # Usiamo 'cumulative_iters' invece di 'update_interval'
+#)
+
 optimizer = dict(
     lr=6e-05,
     paramwise_cfg=dict(
@@ -107,6 +117,8 @@ runner = dict(type='IterBasedRunner', max_iters=40000)
 checkpoint_config = dict(by_epoch=False, interval=40000, max_keep_ckpts=1)
 evaluation = dict(interval=4000, metric='mIoU')  # 4000
 # Meta Information for Result Analysis
+# --- AGGIUNGI QUESTA RIGA ---
+fp16 = dict(loss_scale='dynamic')
 
 name = 'cs2dsec_image+events_b3'
 exp = 'basic'

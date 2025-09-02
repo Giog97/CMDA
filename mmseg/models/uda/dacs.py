@@ -30,6 +30,18 @@ from mmseg.models.uda.prototype_contrast import ContrastCELoss
 
 plt.switch_backend('agg')
 
+class ProjectionHead(nn.Module):
+    def __init__(self, input_dim=256, projection_dim=128):
+        super().__init__()
+        self.projection = nn.Sequential(
+            nn.Linear(input_dim, input_dim),
+            nn.ReLU(),
+            nn.Linear(input_dim, projection_dim)
+        )
+
+    def forward(self, x):
+        return self.projection(x)
+
 class InfoNCELoss(nn.Module):
     """
     Loss InfoNCE per l'apprendimento contrastivo.
@@ -92,11 +104,23 @@ class DACS(UDADecoratorFusion):
         self.local_iter = 0
         self.max_iters = cfg['max_iters']
         self.alpha = cfg['alpha']
+
+        # --- AGGIUNGI QUESTA RIGA ---
+        self.update_interval = cfg.get('update_interval', 1)
+        # ---
+
         self.enable_contrastive = cfg.get('enable_contrastive', False)
         if self.enable_contrastive:
             self.contrastive_lambda = cfg['contrastive_lambda']
             self.contrastive_temperature = cfg.get('contrastive_temperature', 0.07)
             self.contrastive_loss = InfoNCELoss(temperature=self.contrastive_temperature)
+
+             # --- AGGIUNGI QUESTE RIGHE ---
+            backbone_feat_dim = 512 # Dimensione dell'output di mit_b2 (ultimo stadio)
+            projection_dim = 128   # Dimensione comune per lo spazio contrastivo
+            self.projection_head = ProjectionHead(backbone_feat_dim, projection_dim).cuda()
+            # ---
+
             print(f"Contrastive Loss enabled with lambda={self.contrastive_lambda} and temp={self.contrastive_temperature}")
         self.pseudo_threshold = cfg['pseudo_threshold']
         self.psweight_ignore_top = cfg['pseudo_weight_ignore_top']
@@ -354,7 +378,7 @@ class DACS(UDADecoratorFusion):
                 num_samples = data_batch['target']['warp_image'].shape[0]
             outputs = dict(log_vars=log_vars, num_samples=num_samples)
         return outputs
-
+    
     def masked_feat_dist(self, f1, f2, mask=None):
         feat_diff = f1 - f2
         # mmcv.print_log(f'fdiff: {feat_diff.shape}', 'mmseg')
@@ -565,7 +589,7 @@ class DACS(UDADecoratorFusion):
         source_ce_loss, clean_log_vars = self._parse_losses(source_ce_losses)  # ['decode.loss_seg', 'decode.acc_seg']
         log_vars.update(clean_log_vars)
         source_loss = source_ce_loss
-        source_loss.backward(retain_graph=self.enable_fdist)
+        (source_loss / self.update_interval).backward(retain_graph=self.enable_fdist)
 
         if self.enable_contrastive:
             # Applichiamo la loss contrastiva sui dati del dominio TARGET,
@@ -588,6 +612,12 @@ class DACS(UDADecoratorFusion):
                 anchor_vec = F.adaptive_avg_pool2d(anchor_tensor, 1).squeeze(-1).squeeze(-1)
                 positive_vec = F.adaptive_avg_pool2d(positive_tensor, 1).squeeze(-1).squeeze(-1)
 
+                # --- INIZIO MODIFICA ---
+                # Passiamo i vettori attraverso la projection head
+                anchor_vec = self.projection_head(anchor_vec)
+                positive_vec = self.projection_head(positive_vec)
+                # --- FINE MODIFICA ---
+
                 anchor_vec = F.normalize(anchor_vec, p=2, dim=1)
                 positive_vec = F.normalize(positive_vec, p=2, dim=1)
 
@@ -598,7 +628,7 @@ class DACS(UDADecoratorFusion):
 
                 log_vars['loss_contrastive'] = loss_contrastive.item()
                 # Applichiamo i gradienti di questa loss ai pesi del modello
-                loss_contrastive.backward()
+                (loss_contrastive / self.update_interval).backward()
             else:
                 log_vars['loss_contrastive'] = 0.0
 
@@ -1027,7 +1057,7 @@ class DACS(UDADecoratorFusion):
         log_vars.update(mix_log_vars)
         # log_vars = dict_keys(['decode.loss_seg', 'decode.acc_seg', 'loss', 'mix.decode.loss_seg', 'mix.decode.acc_seg'])
         target_loss = mix_loss
-        target_loss.backward()
+        (target_loss / self.update_interval).backward()
 
         ################################################################
         ################### create mix data visualization
