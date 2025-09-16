@@ -36,6 +36,12 @@ def get_pretraining_file(backbone):
         return 'pretrained/mit_b4.pth'
     if 'mitb3' in backbone:
         return 'pretrained/mit_b3.pth'
+    if 'mitb2' in backbone:
+        return 'pretrained/mit_b2.pth'
+    if 'mitb1' in backbone:
+        return 'pretrained/mit_b1.pth'
+    if 'mitb0' in backbone:
+        return 'pretrained/mit_b0.pth'
     if 'r101v1c' in backbone:
         return 'open-mmlab://resnet101_v1c'
     return {

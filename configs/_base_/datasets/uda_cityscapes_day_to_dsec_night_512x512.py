@@ -1,3 +1,4 @@
+# Modificato by MaryGio
 # dataset settings
 """
 dataset_type = 'CityscapesDataset'
@@ -8,8 +9,12 @@ crop_size = (512, 512)
 """
 # crop_size=None, after_crop_resize_size=None
 data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=4,
+    # samples_per_gpu=2,
+    samples_per_gpu=1,
+
+    # workers_per_gpu=4,
+    workers_per_gpu=2,
+
     train=dict(
         type='UDADataset',
         source=dict(
@@ -33,4 +38,5 @@ data = dict(
     test=dict(
         type='DSECDataset',
         dataset_txt_path='./night_test_dataset_warp.txt',
-        outputs={'warp_image', 'events_vg', 'label', 'img_metas'}))
+        outputs={'warp_image', 'events_vg', 'label', 'img_metas'})
+)

@@ -8,6 +8,7 @@ from .gta import GTADataset
 from .synthia import SynthiaDataset
 from .uda_dataset import UDADataset, OrgUDADataset
 from .dsec import DSECDataset
+from .dsec_originale import DSECDataset_originale #aggiunto '_originale'
 from .cityscapes_ic import CityscapesICDataset
 from .dark_zurich_ic import DarkZurichICDataset
 
@@ -28,5 +29,6 @@ __all__ = [
     'DarkZurichDataset',
     'DSECDataset',
     'CityscapesICDataset',
-    'DarkZurichICDataset'
+    'DarkZurichICDataset',
+    'DSECDataset_originale' # #aggiunto '_originale'
 ]

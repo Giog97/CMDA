@@ -1,7 +1,8 @@
+# Modificato by MaryGio
 _base_ = [
     '../_base_/default_runtime.py',
     # DAFormer Network Architecture
-    '../_base_/models/daformer_sepaspp_mitb5.py',
+    '../_base_/models/daformer_sepaspp_mitb3.py',
     # Se voglio modificare il DAFormer usare il seguente riga invece che la precedente
     #'../_base_/models/daformer_sepaspp_resnet18.py',
     # GTA->Cityscapes Data Loading
@@ -17,8 +18,7 @@ _base_ = [
 seed = 0
 
 # Modifications to Basic model
-#pretrained_type = 'mit_b5' # versione originale
-pretrained_type = 'mit_b3' # versione modificata
+pretrained_type = 'mit_b3'
 events_bins = 1
 train_type = 'cs2dsec_image+events_together'
 # Questo potrebbe essere il modello da dover modificare
@@ -41,17 +41,26 @@ model = dict(
     decode_head=dict(type='DAFormerHeadFusion',
                      decoder_params=dict(train_type=train_type,
                                          share_decoder=True)),
-    train_type=train_type
+    train_type=train_type,
+    # loss_triplet=dict(type='TripletLoss', margin=1.0, loss_weight=0.1) # <-- AGGIUNGO QUESTA RIGA
 )
 
 # Modifications to Basic UDA
 uda = dict(
     # Increased Alpha
     alpha=0.999,
+    enable_contrastive=True,
+    #contrastive_lambda=0.1,  # Puoi iniziare con questo valore e poi sintonizzarlo
+    contrastive_lambda=0.5, # per "forzare" il modello a dare più importanza a questa loss. --> questo serve per aumentare il peso della contrastive loss in modo tale da vederla cambiare
+    #contrastive_lambda=1.0, # per "forzare" il modello a dare più importanza a questa loss. --> questo serve per aumentare il peso della contrastive loss in modo tale da vederla cambiare
+    #contrastive_temperature=0.07,
+    contrastive_temperature=0.1,
+    contrastive_negative_mode='all',  # Nuovo parametro --> improvedinfoNCE
     cyclegan_itrd2en_path='./pretrained/cityscapes_ICD_to_dsec_EN.pth',
     img_self_res_reg='no',  # no, only_isr, mixed
     train_type=train_type,
-    forward_cfg=dict(loss_weight={'image': 0.5, 'events': 0.5, 'fusion': 0.5, 'img_self_res': 0.25},
+    forward_cfg=dict(isr_events_fusion_choice=0.5,
+                     loss_weight={'image': 0.5, 'events': 0.5, 'fusion': 0.5, 'img_self_res': 0.25},
                      gradual_rate=0.0),
     mixed_image_to_mixed_isr=True,
     random_choice_thres='0.5',
@@ -72,7 +81,7 @@ data = dict(
     train=dict(
         # Rare Class Sampling
         rare_class_sampling=dict(min_pixels=3000, class_temp=0.01, min_crop_ratio=0.5),
-        source=dict(outputs={'image', 'img_time_res', 'img_self_res', 'label'},
+        source=dict(outputs={'image', 'img_time_res', 'img_self_res', 'label', 'events_vg'}, # <-- AGGIUNGI 'events_vg' QUI
                     return_GI_or_IC='image_change',
                     shift_type='random'),
         target=dict(events_bins=events_bins,
@@ -82,7 +91,7 @@ data = dict(
                                    _threshold=0.005,
                                    _clip_range=0.1,
                                    shift_pixel=1),
-                    outputs={'warp_image', 'events_vg', 'warp_img_self_res'})),
+                    outputs={'warp_image', 'events_vg', 'warp_img_self_res', 'negative_events'})),
     val=dict(events_bins=events_bins),
     test=dict(events_bins=events_bins))
 
@@ -106,12 +115,8 @@ evaluation = dict(interval=4000, metric='mIoU')  # 4000
 name = 'cs2dsec_image+events_b3'
 exp = 'basic'
 name_dataset = 'cityscapes_day2dsec_night'
-#name_architecture = 'daformer_sepaspp_mitb5_events' #originali
-name_architecture = 'daformer_sepaspp_mitb3_events' # Versione semplificata
-#name_encoder = 'mitb5' #originali
-name_encoder = 'mitb3' # Versione semplificata
-#name_encoder = 'resnet18' #modificato
-#name_architecture = 'daformer_sepaspp_resnet18' #modificato
+name_architecture = 'daformer_sepaspp_mitb3_events' #originali
+name_encoder = 'mitb3' #originali
 name_decoder = 'daformer_sepaspp_events'
 name_uda = 'dacs_a999_rcs0.01_cpl'
 name_opt = 'adamw_6e-05_pmTrue_poly10warm_1x2_40k'

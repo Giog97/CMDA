@@ -320,4 +320,3 @@ class DAFormerHeadFusion(BaseDecodeHeadFusion):
 
         return {'image_output': image_output, 'events_output': events_output, 'fusion_output': fusion_output,
                 'img_self_res_output': img_self_res_output}
-

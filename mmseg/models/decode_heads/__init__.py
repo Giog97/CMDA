@@ -1,6 +1,7 @@
 from .aspp_head import ASPPHead
 from .da_head import DAHead
 from .daformer_head import DAFormerHead, DAFormerHeadFusion
+from .daformer_head_originale import DAFormerHead_originale, DAFormerHeadFusion_originale # aggiunto '_originale'
 from .dlv2_head import DLV2Head
 from .fcn_head import FCNHead
 from .isa_head import ISAHead
@@ -21,4 +22,6 @@ __all__ = [
     'DAFormerHead',
     'DAFormerHeadFusion',
     'ISAHead',
+    'DAFormerHead_originale',
+    'DAFormerHeadFusion_originale',
 ]

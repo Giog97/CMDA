@@ -1,3 +1,4 @@
+# Modificato per poter usare con il parser mit_b1 e mit_b2
 import argparse
 import json
 import os
@@ -34,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true')
 
     parser.add_argument('--name', type=str, default='')
-    parser.add_argument('--backbone', type=str, choices=['mit_b3', 'mit_b4', 'mit_b5', ''], default='') #Qui è dove scegliamo la Backbone
+    parser.add_argument('--backbone', type=str, choices=['mit_b3', 'mit_b4', 'mit_b5', 'mit_b0', 'mit_b1', 'mit_b2'], default='') # Qui è dove scegliamo la Backbone
     parser.add_argument('--fusion', type=str, choices=['caf', 'af', 'attf', 'attfavg', ''], default='')
     parser.add_argument('--test_mode', action='store_true', default=False)
     parser.add_argument('--batch_size', type=int, default=-1)

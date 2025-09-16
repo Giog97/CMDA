@@ -68,8 +68,6 @@ In that environment, the requirements can be installed with:
 ```shell
 pip install -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
 pip install mmcv-full==1.3.7  # requires the other packages to be installed first
-# Probabilmente il comando giusto per far partite l'installazione di mmcv-full è il seguente
-# pip install mmcv-full==1.3.7 -f https://download.openmmlab.com/mmcv/dist/cu110/torch1.7.0/index.html
 ```
 
 Further, please download the pretrained backbone `mit_b5.pth` 
@@ -192,6 +190,11 @@ Comando mod per lancio mit_b3 e train semplificato:
 ```shell
 python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dsec_image+events_together_b3.py --name cmda_cs2dsecGM --backbone mit_b3   --batch_size 1
 ```
+
+Comando mod per lancio mit_b2, e su seconda GPU e train semplificato:
+```shell
+CUDA_VISIBLE_DEVICES=1 python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dsec_image+events_together_b2.py --name cmda_cs2dsec
+```
 Si può modificare le dimensioni da lanciare aggiungendo: --train_size 400-400
 
 **Cityscapes→DarkZurich (Optional):** 
@@ -203,7 +206,7 @@ Comando mod per lancio mit_b3 e train semplificato:
 ```shell
 python my_run_experiments.py --root_path ./ --base_config configs/fusion/cs2dz_image+raw-isr_b3.py   --backbone mit_b3   --batch_size 1   --name cmda_cs2dzGM
 ```
-Si può modificare le dimensioni da lanciare aggiungendo: --train_size 400-400
+Si può modificare le dimensioni da lanciare aggiungendo: --train_size 400-400 (o '440-440', '512-512')
 
 ## Testing & Predictions
 
