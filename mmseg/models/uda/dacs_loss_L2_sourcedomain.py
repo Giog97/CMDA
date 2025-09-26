@@ -530,7 +530,6 @@ class DACS(UDADecoratorFusion):
         # src_feat dovrebbe contenere le features del source 
         # struttura è features = {'f_image': f_image, 'f_events': f_events, 'f_fusion': f_fusion, 'f_img_self_res': f_img_self_res}
         
-        # --- new inizio ---
         # Prendo features immagine e eventi dal source
         # Estrazione feature di immagine e eventi dal dizionario x (src_feat) contenente tutte le liste di features
         f_image = src_feat['f_image']
@@ -545,8 +544,6 @@ class DACS(UDADecoratorFusion):
         # Inizializzo con la CE loss
         source_loss = source_ce_loss
 
-        """
-        # loss L2 source Domain RGB-Event DISATTIVATA PERCHè AVEVAMO CATTIVE PERFORMANCE
         # Aggiungo L2 loss (solo source domain)
         # Calcolo L2 loss tra ultimo livello
         lambda_l2 = self.train_cfg.get('lambda_l2', 0.0)
@@ -555,8 +552,6 @@ class DACS(UDADecoratorFusion):
             l2_loss_sd = F.mse_loss(f_image[-1], f_events[-1]) * lambda_l2  #l2_loss_sd --> sd=source domain
             log_vars['loss_l2_source_domain_RGB_Event'] = l2_loss_sd.item()
             source_loss = source_loss + l2_loss_sd
-        """
-        # --- new fine ---
 
         # Backward (per apprendere anche grazie alla nuova loss)
         source_loss.backward(retain_graph=self.enable_fdist)
@@ -886,13 +881,7 @@ class DACS(UDADecoratorFusion):
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
                                                                   return_feat=True, cfg=self.forward_cfg)
 
-        #mix_losses.pop('features')  # dict_keys(['features', 'decode.loss_seg', 'decode.acc_seg'])
-
-        # --- new inizio 1 ---
-        # Invece di buttare via le feature del target con la riga precedente, le prendo in considerazione per la L2 loss tra features domain source e target
-        tgt_feat = mix_losses.pop('features')  # ottieni features target
-        # --- new fine 1 ---
-
+        mix_losses.pop('features')  # dict_keys(['features', 'decode.loss_seg', 'decode.acc_seg'])
         mix_losses = add_prefix(mix_losses, 'mix')  # dict_keys(['mix.decode.loss_seg', 'mix.decode.acc_seg'])
         # mix_loss = tensor(2.5249, device='cuda:0', grad_fn=<AddBackward0>)
         # mix_log_vars = OrderedDict([('mix.decode.loss_seg', 2.524905204772949),
@@ -902,18 +891,6 @@ class DACS(UDADecoratorFusion):
         log_vars.update(mix_log_vars)
         # log_vars = dict_keys(['decode.loss_seg', 'decode.acc_seg', 'loss', 'mix.decode.loss_seg', 'mix.decode.acc_seg'])
         target_loss = mix_loss
-
-        # --- new inizio 2 ---
-        lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
-        if lambda_l2_st > 0:
-            f_src = src_feat['f_fusion'][-1]   # o f_image/f_events a seconda di cosa vogliamo
-            f_tgt = tgt_feat['f_fusion'][-1]
-            # detach sul source: così il gradiente fluisce solo dal target
-            l2_loss_st = F.mse_loss(f_tgt, f_src.detach()) * lambda_l2_st
-            log_vars['loss_l2_source_target'] = l2_loss_st.item()
-            target_loss = target_loss + l2_loss_st
-        # --- new fine 2 ---
-
         target_loss.backward()
 
         ################################################################

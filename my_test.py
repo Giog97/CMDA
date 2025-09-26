@@ -8,7 +8,7 @@ if __name__ == '__main__':
     parser.add_argument('--work_dir', type=str, default='', required=True)
     opt = parser.parse_args()
 
-    comman_command = 'python -m tools.test --submit_to_website'  # --submit_to_website --image_isr
+    comman_command = 'python -m tools.test' #--submit_to_website'  # --submit_to_website --image_isr
 
     # work_dirs = ['work_dirs/local-basic/230221_1646_cs2dz_image+raw-isr_SharedD_L07_C01_b5_896f6']
 

@@ -697,8 +697,8 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
 
     def extract_feat(self, image, events, img_self_res=None, cfg=None):
         """Extract features from images."""
-        f_image = self.backbone_image(image.detach()) if image is not None else None
-        f_events = self.backbone_events(events.detach()) if events is not None else None
+        f_image = self.backbone_image(image.detach()) if image is not None else None # Estrae features immagini
+        f_events = self.backbone_events(events.detach()) if events is not None else None # Estrae features eventi
         f_img_self_res = self.backbone_events(img_self_res.detach()) if img_self_res is not None else None
         if 'no_fusion' in cfg.keys() and cfg['no_fusion']:
             f_fusion = None
@@ -813,7 +813,7 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
             img_self_res = inputs['img_self_res']
         else:
             img_self_res = None
-        x = self.extract_feat(image, events, img_self_res, cfg=cfg)
+        x = self.extract_feat(image, events, img_self_res, cfg=cfg) # Qui abbiamo l'uso degli encoder per ottenere le features
 
         if self.train_type == 'cs2dz_image+raw-isr_no-fusion':
             if 'mixed_isr_features' in cfg.keys() and cfg['mixed_isr_features'] is not None:
@@ -824,7 +824,7 @@ class FusionEncoderDecoder(BaseSegmentorFusion):
 
         if return_feat:
             losses['features'] = x
-        loss_decode, pred = self._decode_head_forward_train(x, None, gt_semantic_seg, seg_weight, cfg)
+        loss_decode, pred = self._decode_head_forward_train(x, None, gt_semantic_seg, seg_weight, cfg) # Qui abbiamo l'uso dei decoder
         losses.update(loss_decode)
 
         assert not self.with_auxiliary_head

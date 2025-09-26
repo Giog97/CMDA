@@ -1,4 +1,4 @@
-# Modificato by MaryGio
+# Modificato by Gionni
 _base_ = [
     '../_base_/default_runtime.py',
     # DAFormer Network Architecture
@@ -42,6 +42,10 @@ model = dict(
                      decoder_params=dict(train_type=train_type,
                                          share_decoder=True)),
     train_type=train_type,
+    train_cfg=dict( # --> aggiunto questa lambda viene usata in dacs.py per pesare la loss L2 sul source domain
+        #lambda_l2=0.1,  # peso della loss di L2 nel source domain giorno tra RGB e Events --> rimosso perchè cattive performance
+        lambda_l2_st=0.05    # nuova loss source-target
+    ),
 )
 
 # Modifications to Basic UDA
@@ -98,13 +102,13 @@ optimizer = dict(
             norm=dict(decay_mult=0.0))))
 
 n_gpus = 1
-#runner = dict(type='IterBasedRunner', max_iters=40000) #originale
-runner = dict(type='IterBasedRunner', max_iters=4000) #modificata per velocizzare
+runner = dict(type='IterBasedRunner', max_iters=40000) #originale
+#runner = dict(type='IterBasedRunner', max_iters=4000) #modificata per velocizzare
 # Logging Configuration
-#checkpoint_config = dict(by_epoch=False, interval=40000, max_keep_ckpts=1)
-checkpoint_config = dict(by_epoch=False, interval=4000, max_keep_ckpts=1)
-#evaluation = dict(interval=4000, metric='mIoU')  # 4000
-evaluation = dict(interval=400, metric='mIoU')
+checkpoint_config = dict(by_epoch=False, interval=40000, max_keep_ckpts=1) #originale
+#checkpoint_config = dict(by_epoch=False, interval=4000, max_keep_ckpts=1) #modificata per velocizzare
+evaluation = dict(interval=4000, metric='mIoU')  # 4000 #originale
+#evaluation = dict(interval=400, metric='mIoU') #modificata per velocizzare
 # Meta Information for Result Analysis
 
 name = 'cs2dsec_image+events_b2'
