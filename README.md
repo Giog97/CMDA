@@ -245,7 +245,7 @@ python my_test.py --work_dir ./work_dirs/local-basic/nome_della_directory_creata
 ## Checkpoints
 
 I checkpoints e i log prodotti dai nostri esperimenti su Cityscapes→DSEC sono presenti al seguente link di GDrive:
-* [CMDA for Cityscapes→DSEC](todo)
+* [CMDA for Cityscapes→DSEC](https://drive.google.com/drive/u/0/folders/13vdrbKVXYU4r6A6VnAaYhk9odQWPJyh6)
 
 
 Notare che i checkpoint vengono prodotti dopo il train nella cartella '/work_dir' includendo anche i log di training. Si prega inoltre di notare che:
