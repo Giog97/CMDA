@@ -1,6 +1,11 @@
-pretrained/
-pretrained/
+# File Python compilati
 *.pyc
 __pycache__/
+
+# Directory dei modelli e dati
+pretrained/
+data/
+data/DSEC_Night
+
+# Directory di output o risultati
 work_dirs/
-risultati_analisi/

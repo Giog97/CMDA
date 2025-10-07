@@ -37,7 +37,7 @@ def get_pretraining_file(backbone):
     if 'mitb3' in backbone:
         return 'pretrained/mit_b3.pth'
     if 'mitb2' in backbone:
-        return 'pretrained/mit_b2.pth'
+        return 'pretrained/mit_b2.pth' # Aggiunta mit_b2 + le altre mit_b
     if 'mitb1' in backbone:
         return 'pretrained/mit_b1.pth'
     if 'mitb0' in backbone:

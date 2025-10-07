@@ -1,3 +1,4 @@
+# Alla fine non è stata usata a causa del batch_size = 1
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

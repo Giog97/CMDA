@@ -1,4 +1,5 @@
 # Implementata L2 loss tra features immagine RGB e features eventi sul source domain (giorno)
+# Test2 --> ricordati di modificare anche il file di config per attivare la loss L2 (ovvero inserire lambda giusti)
 # The ema model and the domain-mixing are based on:
 # https://github.com/vikolss/DACS
 
@@ -52,11 +53,8 @@ def calc_grad_magnitude(grads, norm_type=2.0):
     return norm
 
 
-# Io voglio applicare la loss L2 tra feature diurne RGB e feature diurne Eventi.
-# Questo significa che la modifica va fatta nella classe DACS, 
-# perché Se vuoi che la L2 loss venga calcolata solo sul source domain (giorno), 
-# devi spostare questa parte di logica fuori dal segmentor e dentro la pipeline di UDA, 
-# cioè in dacs.py (il trainer che gestisce sorgente e target)..
+# Se si vuole applicare la loss L2 tra feature RGB o Eventi, source o target.
+# Dobbiamo modificare la classe DACS. Nello specifico nel forward_train 
 @UDA.register_module()
 class DACS(UDADecoratorFusion):
 
@@ -903,7 +901,9 @@ class DACS(UDADecoratorFusion):
         # log_vars = dict_keys(['decode.loss_seg', 'decode.acc_seg', 'loss', 'mix.decode.loss_seg', 'mix.decode.acc_seg'])
         target_loss = mix_loss
 
-        # --- new inizio 2 ---
+        # --- new inizio 2.1 ---
+        """ 
+        # Disabilitata L2 loss source-target domain features
         lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
         if lambda_l2_st > 0:
             f_src = src_feat['f_fusion'][-1]   # o f_image/f_events a seconda di cosa vogliamo
@@ -912,8 +912,39 @@ class DACS(UDADecoratorFusion):
             l2_loss_st = F.mse_loss(f_tgt, f_src.detach()) * lambda_l2_st
             log_vars['loss_l2_source_target'] = l2_loss_st.item()
             target_loss = target_loss + l2_loss_st
-        # --- new fine 2 ---
+        """
+        # --- new fine 2.1 ---
+        # --- new inizio 2.2 ---
+        # Pesiamo lambda a 0.1
 
+        lambda_l2_rgb_st = self.train_cfg.get('lambda_l2_rgb_st', 0.0)
+        lambda_l2_events_st = self.train_cfg.get('lambda_l2_events_st', 0.0)
+
+        # NB: f_image e f_events sono liste di feature maps -> prendiamo ultimo livello [-1]
+        if (lambda_l2_rgb_st > 0 or lambda_l2_events_st > 0) and tgt_feat is not None:
+            f_src_img = src_feat['f_image'][-1]    # features immagine source (giorno)
+            f_tgt_img = tgt_feat['f_image'][-1]    # features immagine target (notte)
+
+            f_src_evt = src_feat['f_events'][-1]   # features eventi source (giorno)
+            f_tgt_evt = tgt_feat['f_events'][-1]   # features eventi target (notte)
+
+            # 1) L2 tra immagine source e immagine target
+            if lambda_l2_rgb_st > 0 and f_src_img is not None and f_tgt_img is not None:
+                # detach sul source: così il gradiente fluisce solo dal target
+                l2_loss_rgb_st = F.mse_loss(f_tgt_img, f_src_img.detach()) * lambda_l2_rgb_st
+                log_vars['L2_loss_RGB_st'] = l2_loss_rgb_st.item()
+                target_loss = target_loss + l2_loss_rgb_st
+
+            # 2) L2 tra eventi source e eventi target
+            if lambda_l2_events_st > 0 and f_src_evt is not None and f_tgt_evt is not None:
+                # detach sul source: così il gradiente fluisce solo dal target
+                l2_loss_events_st = F.mse_loss(f_tgt_evt, f_src_evt.detach()) * lambda_l2_events_st
+                log_vars['L2_loss_EVENTS_st'] = l2_loss_events_st.item()
+                target_loss = target_loss + l2_loss_events_st
+            
+        # --- new fine 2.2 ---
+
+        # Si va addesso a fare il backward della loss totale (mix + L2 loss), in modo che il gradiente fluisca anche sul target
         target_loss.backward()
 
         ################################################################

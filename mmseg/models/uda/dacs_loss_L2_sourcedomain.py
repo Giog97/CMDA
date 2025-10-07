@@ -52,11 +52,8 @@ def calc_grad_magnitude(grads, norm_type=2.0):
     return norm
 
 
-# Io voglio applicare la loss L2 tra feature diurne RGB e feature diurne Eventi.
-# Questo significa che la modifica va fatta nella classe DACS, 
-# perché Se vuoi che la L2 loss venga calcolata solo sul source domain (giorno), 
-# devi spostare questa parte di logica fuori dal segmentor e dentro la pipeline di UDA, 
-# cioè in dacs.py (il trainer che gestisce sorgente e target)..
+# Se si vuole applicare la loss L2 tra feature RGB o Eventi, source o target.
+# Dobbiamo modificare la classe DACS. Nello specifico nel forward_train 
 @UDA.register_module()
 class DACS(UDADecoratorFusion):
 

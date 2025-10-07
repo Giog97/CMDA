@@ -1,4 +1,4 @@
-# Modificato by MaryGio
+# Modificato solo il samples_per_gpu e workers_per_gpu per farlo funzionare
 # dataset settings
 """
 dataset_type = 'CityscapesDataset'

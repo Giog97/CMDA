@@ -1,3 +1,5 @@
+# Implementata L2 loss tra features immagine RGB e features eventi sul source domain (giorno)
+# Test2 --> ricordati di modificare anche il file di config per attivare la loss L2 (ovvero inserire lambda giusti)
 # The ema model and the domain-mixing are based on:
 # https://github.com/vikolss/DACS
 
@@ -11,8 +13,6 @@ import mmcv.runner.hooks.logger.text
 import mmcv
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from timm.models.layers import DropPath
 from torch.nn.modules.dropout import _DropoutNd
@@ -28,40 +28,9 @@ from mmseg.utils.utils import downscale_label_ratio
 from mmseg.datasets.utils import get_image_change_from_pil
 from mmseg.models.uda.prototype_contrast import ContrastCELoss
 
+import torch.nn.functional as F #aggiunto per usare loss l2 (mse)
+
 plt.switch_backend('agg')
-
-class InfoNCELoss(nn.Module):
-    """
-    Loss InfoNCE per l'apprendimento contrastivo.
-    Assume che le feature in input siano già normalizzate (L2-norm).
-    """
-    def __init__(self, temperature=0.07):
-        super(InfoNCELoss, self).__init__()
-        self.temperature = temperature
-        self.cosine_similarity = nn.CosineSimilarity(dim=-1)
-
-    def forward(self, anchor_feat, positive_feat, negative_feat):
-        """
-        Args:
-            anchor_feat (Tensor): Feature dell'ancora. Shape: [N, D]
-            positive_feat (Tensor): Feature del campione positivo. Shape: [N, D]
-            negative_feat (Tensor): Feature del campione negativo. Shape: [N, D]
-        """
-        # Calcola similarità
-        sim_positive = self.cosine_similarity(anchor_feat, positive_feat) / self.temperature
-        sim_negative = self.cosine_similarity(anchor_feat, negative_feat) / self.temperature
-
-        # Prepara i logits per la CrossEntropyLoss
-        # La prima colonna è la similarità con il positivo (la classe "corretta")
-        # La seconda colonna è la similarità con il negativo
-        logits = torch.stack([sim_positive, sim_negative], dim=1)
-
-        # I target sono sempre la prima colonna (indice 0)
-        labels = torch.zeros(anchor_feat.shape[0], dtype=torch.long, device=anchor_feat.device)
-        
-        # Calcola la loss
-        loss = F.cross_entropy(logits, labels)
-        return loss
 
 
 def _params_equal(ema_model, model):
@@ -84,6 +53,8 @@ def calc_grad_magnitude(grads, norm_type=2.0):
     return norm
 
 
+# Se si vuole applicare la loss L2 tra feature RGB o Eventi, source o target.
+# Dobbiamo modificare la classe DACS. Nello specifico nel forward_train 
 @UDA.register_module()
 class DACS(UDADecoratorFusion):
 
@@ -92,12 +63,6 @@ class DACS(UDADecoratorFusion):
         self.local_iter = 0
         self.max_iters = cfg['max_iters']
         self.alpha = cfg['alpha']
-        self.enable_contrastive = cfg.get('enable_contrastive', False)
-        if self.enable_contrastive:
-            self.contrastive_lambda = cfg['contrastive_lambda']
-            self.contrastive_temperature = cfg.get('contrastive_temperature', 0.07)
-            self.contrastive_loss = InfoNCELoss(temperature=self.contrastive_temperature)
-            print(f"Contrastive Loss enabled with lambda={self.contrastive_lambda} and temp={self.contrastive_temperature}")
         self.pseudo_threshold = cfg['pseudo_threshold']
         self.psweight_ignore_top = cfg['pseudo_weight_ignore_top']
         self.psweight_ignore_bottom = cfg['pseudo_weight_ignore_bottom']
@@ -396,16 +361,11 @@ class DACS(UDADecoratorFusion):
         return feat_loss, feat_log
 
     def forward_train(self, **kwargs):
-        
-        # print("Chiavi disponibili in kwargs:", kwargs.keys()) # <-- AGGIUNGI QUESTA RIGA DI DEBUG
 
         ################################################################
         ################### load source and target data
         ################################################################
-
-        day_image, day_label, day_events, day_isr = None, None, None, None # <-- Modifica questa riga
-        night_image, night_events, night_isr, night_negative_events = None, None, None, None
-
+        day_events, night_events = None, None
         if self.train_type in {'cs2dsec_image', 'cs2dz_image'}:
             night_key = 'warp_image' if 'warp_image' in kwargs['target'].keys() else 'image'
             day_image = kwargs['source']['image']
@@ -439,34 +399,36 @@ class DACS(UDADecoratorFusion):
             else:
                 night_image = kwargs['target']['image']
                 night_isr = kwargs['target']['night_isr']
-        elif self.train_type in {'cs2dsec_image+events', 'cs2dsec_image+events_together'}:
+        else:
+            assert self.train_type in {'cs2dsec_image+events', 'cs2dsec_image+events_together'}
             day_image = kwargs['source']['image']
-            day_label = kwargs['source']['label']
-            day_events = kwargs['source'].get('events_vg')
-            day_isr = kwargs['source'].get('img_self_res')
+            day_isr = kwargs['source']['img_self_res']
+            if self.cyclegan_itrd2en is not None:
+                with torch.no_grad():
+                    kwargs['source']['img_time_res'] = torch.mean(kwargs['source']['img_time_res'], dim=1, keepdim=True)
+                    day_events = self.cyclegan_itrd2en(kwargs['source']['img_time_res'])
+                    day_events = day_events.repeat(1, 3, 1, 1)
+            else:
+                day_events = kwargs['source']['img_time_res']
 
+            day_label = kwargs['source']['label']
             night_image = kwargs['target']['warp_image']
-            night_events = kwargs['target'].get('events_vg')
-            night_isr = kwargs['target'].get('warp_img_self_res')
-            
-            # Questo è per la nostra loss contrastiva
-            night_negative_events = kwargs['target'].get('negative_events')
+            night_events = kwargs['target']['events_vg']
+            night_isr = kwargs['target']['warp_img_self_res']
+            if self.without_events:
+                self.forward_cfg['isr_events_fusion_choice'] = -1
+            elif self.without_isd:
+                self.forward_cfg['isr_events_fusion_choice'] = 2
+            else:
+                self.forward_cfg['isr_events_fusion_choice'] = torch.rand(1).detach()
+
+            if self.events_isr_choice_start_thres != -1 and self.events_isr_choice_end_thres != -1:
+                self.random_choice_thres = self.events_isr_choice_start_thres + (self.events_isr_choice_end_thres
+                                           - self.events_isr_choice_start_thres) * self.local_iter / self.max_iters
 
         log_vars = {}
-        batch_size = 0
-        if day_image is not None:
-            batch_size = day_image.shape[0]
-        elif day_events is not None:
-            batch_size = day_events.shape[0]
-        dev = None
-        if day_image is not None:
-            dev = day_image.device
-        elif day_events is not None:
-            dev = day_events.device
-        else:
-            # This is the fallback for when both are None.
-            # It gets the device from the model's parameters.
-            dev = next(self.parameters()).device
+        batch_size = day_image.shape[0] if day_image is not None else day_events.shape[0]
+        dev = day_image.device if day_image is not None else day_events.device
 
         if self.deflare_aug:
             night_image_deflare = kwargs['target']['image_deflare']
@@ -530,7 +492,7 @@ class DACS(UDADecoratorFusion):
                 source_label = day_label
             source_ce_losses, pred = self.get_model().forward_train(inputs, source_label, return_feat=True,
                                                                     cfg=self.forward_cfg)
-        elif self.train_type == 'cs2dsec_image+events_together':
+        elif self.train_type == 'cs2dsec_image+events_together': # Questo è il tipo di train usato finora
             source_label = day_label
             inputs = {'image': day_image, 'events': day_events, 'img_self_res': day_isr}
             if self.fuse_both_ice_and_e:
@@ -559,49 +521,43 @@ class DACS(UDADecoratorFusion):
             else:
                 source_ce_losses, pred = self.get_model().forward_train(inputs, source_label, return_feat=True,
                                                                         cfg=self.forward_cfg)
-
+        # Qui in qualisasi modo sia stato fatto il train dovrebbe aver già calcolato predizioni e loss sul source domain (giorno)
+        # posizionare qui il calcolo della L2 loss L2 tra features immagine RGB e features eventi del solo domiono source giorno
         src_feat = source_ce_losses.pop('features')
+        #print(f'[DEBUG] Features dominio sorgente giorno: {src_feat}')
+        # src_feat dovrebbe contenere le features del source 
+        # struttura è features = {'f_image': f_image, 'f_events': f_events, 'f_fusion': f_fusion, 'f_img_self_res': f_img_self_res}
+        
+        # --- new inizio ---
+        # Prendo features immagine e eventi dal source
+        # Estrazione feature di immagine e eventi dal dizionario x (src_feat) contenente tutte le liste di features
+        f_image = src_feat['f_image']
+        f_events = src_feat['f_events']
+        # NB: f_image e f_events sono liste di feature maps (una per ogni livello del backbone)
+        # Di solito si prende l’ultimo livello ([-1])
 
+        # Calcolo della CE loss standard
         source_ce_loss, clean_log_vars = self._parse_losses(source_ce_losses)  # ['decode.loss_seg', 'decode.acc_seg']
         log_vars.update(clean_log_vars)
+
+        # Inizializzo con la CE loss
         source_loss = source_ce_loss
+
+        """
+        # loss L2 source Domain RGB-Event DISATTIVATA PERCHè AVEVAMO CATTIVE PERFORMANCE
+        # Aggiungo L2 loss (solo source domain)
+        # Calcolo L2 loss tra ultimo livello
+        lambda_l2 = self.train_cfg.get('lambda_l2', 0.0)
+        if lambda_l2 > 0 and f_image is not None and f_events is not None:
+            # Calcolo della L2 loss - si prende l'ultimo livello (più semantico) 
+            l2_loss_sd = F.mse_loss(f_image[-1], f_events[-1]) * lambda_l2  #l2_loss_sd --> sd=source domain
+            log_vars['loss_l2_source_domain_RGB_Event'] = l2_loss_sd.item()
+            source_loss = source_loss + l2_loss_sd
+        """
+        # --- new fine ---
+
+        # Backward (per apprendere anche grazie alla nuova loss)
         source_loss.backward(retain_graph=self.enable_fdist)
-
-        if self.enable_contrastive:
-            # Applichiamo la loss contrastiva sui dati del dominio TARGET,
-            # dove abbiamo a disposizione sia immagini (night_image) che eventi (night_events).
-
-            # Estraiamo le feature dal modello STUDENT, permettendo il calcolo dei gradienti.
-            target_feat_dict = self.get_model().extract_feat(
-                image=night_image, events=night_events, cfg=self.forward_cfg
-            )
-
-            if 'f_image' in target_feat_dict and 'f_events' in target_feat_dict and \
-               target_feat_dict['f_image'] is not None and target_feat_dict['f_events'] is not None:
-
-                anchor_features_list = target_feat_dict['f_image']
-                positive_features_list = target_feat_dict['f_events']
-
-                anchor_tensor = anchor_features_list[-1]
-                positive_tensor = positive_features_list[-1]
-
-                anchor_vec = F.adaptive_avg_pool2d(anchor_tensor, 1).squeeze(-1).squeeze(-1)
-                positive_vec = F.adaptive_avg_pool2d(positive_tensor, 1).squeeze(-1).squeeze(-1)
-
-                anchor_vec = F.normalize(anchor_vec, p=2, dim=1)
-                positive_vec = F.normalize(positive_vec, p=2, dim=1)
-
-                negative_vec = positive_vec.roll(shifts=1, dims=0)
-
-                loss_contrastive = self.contrastive_loss(anchor_vec, positive_vec, negative_vec)
-                loss_contrastive = self.contrastive_lambda * loss_contrastive
-
-                log_vars['loss_contrastive'] = loss_contrastive.item()
-                # Applichiamo i gradienti di questa loss ai pesi del modello
-                loss_contrastive.backward()
-            else:
-                log_vars['loss_contrastive'] = 0.0
-
 
         ################################################################
         ################### create source data visualization
@@ -626,39 +582,16 @@ class DACS(UDADecoratorFusion):
                     _, day_fusion_seg = torch.max(day_fusion_softmax, dim=1)
             else:
                 assert self.train_type in {'cs2dsec_image+events', 'cs2dsec_image+events_together'}
-                
                 if self.train_type == 'cs2dsec_image+events_together':
-                    img_self_res_output = pred.get('img_self_res_output', None)
-                    image_output = pred.get('image_output', None)
-                    events_output = pred.get('events_output', None)
-                    fusion_output = pred.get('fusion_output', None)
-
-                    # Initialize variables to None
-                    day_isr_softmax = None
-                    day_isr_seg = None
-                    day_img_softmax = None
-                    day_img_seg = None
-                    day_events_softmax = None
-                    day_events_seg = None
-                    day_fusion_softmax = None
-                    day_fusion_seg = None
-
-                    if img_self_res_output is not None:
-                        day_isr_softmax = torch.softmax(img_self_res_output, dim=1)
-                        _, day_isr_seg = torch.max(day_isr_softmax, dim=1)
-
-                    if image_output is not None:
-                        day_img_softmax = torch.softmax(image_output, dim=1)
-                        _, day_img_seg = torch.max(day_img_softmax, dim=1)
-
-                    if events_output is not None:
-                        day_events_softmax = torch.softmax(events_output, dim=1)
-                        _, day_events_seg = torch.max(day_events_softmax, dim=1)
-
-                    if not self.isr_no_fusion or self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres:
-                        if fusion_output is not None:
-                            day_fusion_softmax = torch.softmax(fusion_output, dim=1)
-                            _, day_fusion_seg = torch.max(day_fusion_softmax, dim=1)
+                    day_isr_softmax = torch.softmax(pred['img_self_res_output'], dim=1)  # img_self_res
+                    _, day_isr_seg = torch.max(day_isr_softmax, dim=1)
+                day_img_softmax = torch.softmax(pred['image_output'], dim=1)  # img
+                _, day_img_seg = torch.max(day_img_softmax, dim=1)
+                day_events_softmax = torch.softmax(pred['events_output'], dim=1)  # events
+                _, day_events_seg = torch.max(day_events_softmax, dim=1)
+                if not self.isr_no_fusion or self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres:  # events
+                    day_fusion_softmax = torch.softmax(pred['fusion_output'], dim=1)  # fusion
+                    _, day_fusion_seg = torch.max(day_fusion_softmax, dim=1)
 
         if self.print_grad_magnitude:  # False
             params = self.get_model().backbone.parameters()
@@ -755,44 +688,35 @@ class DACS(UDADecoratorFusion):
                     gt_pixel_weight = torch.ones(pseudo_weight_events.shape, device=dev)
             else:
                 assert self.train_type in {'cs2dsec_image+events', 'cs2dsec_image+events_together'}
-                if self.forward_cfg.get('isr_events_fusion_choice', 0) > self.random_choice_thres:
+                if self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres:  # events
                     ema_imputs_events_isr = night_events
-                else:
+                else:  # isr
                     ema_imputs_events_isr = night_isr
 
-                # 1. Eseguiamo la chiamata corretta e definitiva al modello
-                ema_logits = self.get_ema_model().encode_decode(
-                    night_image, ema_imputs_events_isr,
-                    img_self_res=night_isr,
-                    test_cfg=self.forward_cfg
-                )
+                if self.fuse_both_ice_and_e:
+                    ema_logits = self.get_ema_model().encode_decode(night_image, night_events,
+                                                                    img_self_res=night_isr,
+                                                                    output_features=True,
+                                                                    test_cfg=dict(self.forward_cfg, **{'fusion_all': True}))
+                elif self.isr_another_fusion and not (self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres):
+                    ema_logits = self.get_ema_model().encode_decode(night_image, night_isr, output_features=True,
+                                                                    test_cfg=dict(self.forward_cfg, **{'fusion_isr': True}))
+                elif self.isr_no_fusion:
+                    ema_logits = self.get_ema_model().encode_decode(night_image, night_events, output_features=True,
+                                                                    test_cfg=self.forward_cfg)
+                else:
+                    ema_logits = self.get_ema_model().encode_decode(night_image, ema_imputs_events_isr, output_features=True,
+                                                                    test_cfg=self.forward_cfg)
 
-                # 2. Calcoliamo i pseudo-label e li assegnamo alle variabili
-                #    che il codice successivo si aspetta (pseudo_prob_f, pseudo_label_f)
-                ema_softmax = torch.softmax(ema_logits.detach(), dim=1)
-                pseudo_prob_f, pseudo_label_f = torch.max(ema_softmax, dim=1)
-
-                # 3. Ora il resto della logica originale funzionerà correttamente
-                pseudo_prob = None
-                pseudo_label = None
-
-                if self.img_self_res_reg == 'no':
-                    if pseudo_prob_f is not None:
-                        pseudo_prob = pseudo_prob_f
-                        pseudo_label = pseudo_label_f
-                
-                # ... (il resto della logica per calcolare pseudo_weight rimane)
-                if self.train_type != 'cs2dz_image+raw-isr_split' and pseudo_prob is not None:
-                    ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1
-                    ps_size = np.size(np.array(pseudo_label.cpu()))
-                    pseudo_weight = torch.sum(ps_large_p).item() / ps_size
-                    pseudo_weight = pseudo_weight * torch.ones(pseudo_prob.shape, device=dev)
-
-                    if self.psweight_ignore_top > 0:
-                        pseudo_weight[:, :self.psweight_ignore_top, :] = 0
-                    if self.psweight_ignore_bottom > 0:
-                        pseudo_weight[:, -self.psweight_ignore_bottom:, :] = 0
-                    gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
+                ema_img_softmax = torch.softmax(ema_logits['image_output'], dim=1)  # img
+                _, ema_img_seg = torch.max(ema_img_softmax, dim=1)
+                ema_events_softmax = torch.softmax(ema_logits['events_output'], dim=1)  # events
+                _, ema_events_seg = torch.max(ema_events_softmax, dim=1)
+                # ema_isr_softmax = torch.softmax(ema_logits['img_self_res_output'], dim=1)  # events
+                # _, ema_isr_seg = torch.max(ema_isr_softmax, dim=1)
+                ema_fusion_softmax = torch.softmax(ema_logits['fusion_output'].detach(), dim=1)  # fusion
+                pseudo_prob_f, pseudo_label_f = torch.max(ema_fusion_softmax, dim=1)
+                pseudo_prob, pseudo_label = pseudo_prob_f, pseudo_label_f
 
                 '''if self.img_self_res_reg == 'mixed':
                     gradual_rate = self.local_iter / self.max_iters  # increased values
@@ -810,29 +734,18 @@ class DACS(UDADecoratorFusion):
                     pseudo_prob, pseudo_label = pseudo_prob_f, pseudo_label_f
                 else:
                     raise ValueError('error self.img_self_res_reg = {}'.format(self.img_self_res_reg))'''
-        
 
-        # Aggiungi qui la logica di inizializzazione e assegnazione
-            pseudo_prob = None
-            pseudo_label = None
+        if self.train_type != 'cs2dz_image+raw-isr_split':
+            ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1  # > 0.968
+            ps_size = np.size(np.array(pseudo_label.cpu()))
+            pseudo_weight = torch.sum(ps_large_p).item() / ps_size
+            pseudo_weight = pseudo_weight * torch.ones(pseudo_prob.shape, device=dev)
 
-            if self.img_self_res_reg == 'no':
-                if pseudo_prob_f is not None:
-                    pseudo_prob = pseudo_prob_f
-                    pseudo_label = pseudo_label_f
-            # Aggiungi altre condizioni per altri tipi di pseudo_prob se necessario
-            
-            if self.train_type != 'cs2dz_image+raw-isr_split' and pseudo_prob is not None:
-                ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1  # > 0.968
-                ps_size = np.size(np.array(pseudo_label.cpu()))
-                pseudo_weight = torch.sum(ps_large_p).item() / ps_size
-                pseudo_weight = pseudo_weight * torch.ones(pseudo_prob.shape, device=dev)
-
-                if self.psweight_ignore_top > 0:
-                    pseudo_weight[:, :self.psweight_ignore_top, :] = 0
-                if self.psweight_ignore_bottom > 0:
-                    pseudo_weight[:, -self.psweight_ignore_bottom:, :] = 0
-                gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
+            if self.psweight_ignore_top > 0:
+                pseudo_weight[:, :self.psweight_ignore_top, :] = 0
+            if self.psweight_ignore_bottom > 0:
+                pseudo_weight[:, -self.psweight_ignore_bottom:, :] = 0
+            gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
 
         ################################################################
         ################### Mix source and target data
@@ -840,14 +753,7 @@ class DACS(UDADecoratorFusion):
         mixed_img, mixed_lbl, mixed_events, mixed_isr = [None] * batch_size, [None] * batch_size, \
                                                         [None] * batch_size, [None] * batch_size
         mixed_lbl_2 = [None] * batch_size
-        
-        # Questa è la logica corretta per gestire il caso in cui day_label è None
-        if day_label is not None:
-            mix_masks = get_class_masks(day_label)  # 0(target) or 1(source)
-            # Continua con il resto del codice che usa mix_masks...
-        else:
-            # Se day_label è None, anche mix_masks deve essere None per evitare errori successivi
-            mix_masks = None
+        mix_masks = get_class_masks(day_label)  # 0(target) or 1(source)
 
         for i in range(batch_size):
             strong_parameters['mix'] = mix_masks[i]
@@ -895,24 +801,10 @@ class DACS(UDADecoratorFusion):
             else:
                 _, mixed_lbl[i] = strong_transform(strong_parameters, target=torch.stack((day_label[i][0], pseudo_label[i])))
                 _, pseudo_weight[i] = strong_transform(strong_parameters, target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))
-        if mixed_img and mixed_img[0] is not None:
-            mixed_img = torch.cat(mixed_img)
-        else:
-            mixed_img = None
-        
-        if mixed_events and mixed_events[0] is not None:
-            mixed_events = torch.cat(mixed_events)
-        else:
-            mixed_events = None
-
-        if mixed_lbl:
-            mixed_lbl = torch.cat(mixed_lbl)
-        else:
-            mixed_lbl = None
-        if mixed_isr and mixed_isr[0] is not None:
-            mixed_isr = torch.cat(mixed_isr)
-        else:
-            mixed_isr = None
+        mixed_img = torch.cat(mixed_img) if mixed_img[0] is not None else None
+        mixed_events = torch.cat(mixed_events) if mixed_events[0] is not None else None
+        mixed_lbl = torch.cat(mixed_lbl)
+        mixed_isr = torch.cat(mixed_isr) if mixed_isr[0] is not None else None
         mixed_lbl_2 = torch.cat(mixed_lbl_2) if self.train_type == 'cs2dz_image+raw-isr_split' else None
         if self.train_type == 'cs2dz_image+d2n-isr':
             if mixed_events is None:
@@ -929,33 +821,26 @@ class DACS(UDADecoratorFusion):
             mixed_events = torch.cat(mixed_events)
 
         ################################################################
-        ################### Train on mixed images
+        ################### Train on mixed images (source + target) -> train on target guided
         ################################################################
-        # Inizializza pseudo_weight a None prima del blocco condizionale
-        pseudo_weight = None
-
         if self.train_type in {'cs2dsec_image', 'cs2dz_image'}:
-            # Assumiamo che pseudo_weight sia calcolato prima
             mix_losses, pred = self.get_model().forward_train(mixed_img, mixed_events, mixed_lbl,
-                                                            seg_weight=pseudo_weight, return_feat=True)
+                                                              seg_weight=pseudo_weight, return_feat=True)
         elif self.train_type == 'cs2dz_image+d2n-isr':
             inputs = {'image': mixed_img, 'events': mixed_events}
             target_lbl = {'image': mixed_lbl, 'events': mixed_lbl_2}
-            # Assumiamo che pseudo_weight sia calcolato prima
             mix_losses, pred = self.get_model().forward_train(inputs, target_lbl, seg_weight=pseudo_weight,
-                                                            return_feat=True, cfg=self.forward_cfg)
+                                                              return_feat=True, cfg=self.forward_cfg)
         elif self.train_type == 'cs2dz_image+raw-isr_split':
             inputs = {'image': mixed_img, 'events': mixed_isr}
             target_lbl = {'image': mixed_lbl, 'events': mixed_lbl_2}
             pseudo_weight_dict = {'image': pseudo_weight_image, 'events': pseudo_weight_events}
-            # Qui viene usato un dict, quindi pseudo_weight non è un problema
             mix_losses, pred = self.get_model().forward_train(inputs, target_lbl, seg_weight=pseudo_weight_dict,
-                                                            return_feat=True, cfg=self.forward_cfg)
+                                                              return_feat=True, cfg=self.forward_cfg)
         elif self.train_type == 'cs2dz_image+raw-isr':
             inputs = {'image': mixed_img, 'events': mixed_isr}
-            # Assumiamo che pseudo_weight sia calcolato prima
             mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
-                                                            return_feat=True, cfg=self.forward_cfg)
+                                                              return_feat=True, cfg=self.forward_cfg)
         elif self.train_type == 'cs2dz_image+raw-isr_no-fusion':
             with torch.no_grad():
                 mixed_isr_features = self.get_model().extract_feat(image=None, events=mixed_isr)['f_events']
@@ -966,26 +851,22 @@ class DACS(UDADecoratorFusion):
                 target_lbl = {'image': mixed_lbl, 'events': seg_label_to_edge_label(mixed_lbl)}
             else:
                 target_lbl = mixed_lbl
-            # Assumiamo che pseudo_weight sia calcolato prima
             mix_losses, pred = self.get_model().forward_train(inputs, target_lbl, seg_weight=pseudo_weight,
-                                                            return_feat=True, cfg=self.forward_cfg)
+                                                              return_feat=True, cfg=self.forward_cfg)
             self.forward_cfg['mixed_isr_features'] = None
         elif self.train_type == 'cs2dsec_image+events_together':
             inputs = {'image': mixed_img, 'events': mixed_events, 'img_self_res': mixed_isr}
             if self.fuse_both_ice_and_e:
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
-                                                                return_feat=True,
-                                                                cfg=dict(self.forward_cfg, **{'fusion_all': True}))
+                                                                  return_feat=True,
+                                                                  cfg=dict(self.forward_cfg, **{'fusion_all': True}))
             elif self.isr_another_fusion and not (self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres):
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
-                                                                return_feat=True,
-                                                                cfg=dict(self.forward_cfg, **{'fusion_isr': True}))
+                                                                  return_feat=True,
+                                                                  cfg=dict(self.forward_cfg, **{'fusion_isr': True}))
             else:
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
-                                                                return_feat=True, cfg=self.forward_cfg)
+                                                                  return_feat=True, cfg=self.forward_cfg)
         else:
             assert self.train_type == 'cs2dsec_image+events'
             inputs = {'image': mixed_img}
@@ -994,19 +875,22 @@ class DACS(UDADecoratorFusion):
             else:  # isr
                 inputs['events'] = mixed_isr
             if self.isr_no_fusion and not (self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres):  # isr
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight, return_feat=True,
-                                                                cfg=dict(self.forward_cfg, **{'no_fusion': True}))
+                                                                  cfg=dict(self.forward_cfg, **{'no_fusion': True}))
             elif self.isr_another_fusion and not (self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres):
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight, return_feat=True,
-                                                                cfg=dict(self.forward_cfg, **{'fusion_isr': True}))
+                                                                  cfg=dict(self.forward_cfg, **{'fusion_isr': True}))
             else:
-                # Assumiamo che pseudo_weight sia calcolato prima
                 mix_losses, pred = self.get_model().forward_train(inputs, mixed_lbl, seg_weight=pseudo_weight,
-                                                                return_feat=True, cfg=self.forward_cfg)
+                                                                  return_feat=True, cfg=self.forward_cfg)
 
-        mix_losses.pop('features')  # dict_keys(['features', 'decode.loss_seg', 'decode.acc_seg'])
+        #mix_losses.pop('features')  # dict_keys(['features', 'decode.loss_seg', 'decode.acc_seg'])
+
+        # --- new inizio 1 ---
+        # Invece di buttare via le feature del target con la riga precedente, le prendo in considerazione per la L2 loss tra features domain source e target
+        tgt_feat = mix_losses.pop('features')  # ottieni features target
+        # --- new fine 1 ---
+
         mix_losses = add_prefix(mix_losses, 'mix')  # dict_keys(['mix.decode.loss_seg', 'mix.decode.acc_seg'])
         # mix_loss = tensor(2.5249, device='cuda:0', grad_fn=<AddBackward0>)
         # mix_log_vars = OrderedDict([('mix.decode.loss_seg', 2.524905204772949),
@@ -1016,6 +900,50 @@ class DACS(UDADecoratorFusion):
         log_vars.update(mix_log_vars)
         # log_vars = dict_keys(['decode.loss_seg', 'decode.acc_seg', 'loss', 'mix.decode.loss_seg', 'mix.decode.acc_seg'])
         target_loss = mix_loss
+
+        # --- new inizio 2.1 ---
+        """ 
+        # Disabilitata L2 loss source-target domain features
+        lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
+        if lambda_l2_st > 0:
+            f_src = src_feat['f_fusion'][-1]   # o f_image/f_events a seconda di cosa vogliamo
+            f_tgt = tgt_feat['f_fusion'][-1]
+            # detach sul source: così il gradiente fluisce solo dal target
+            l2_loss_st = F.mse_loss(f_tgt, f_src.detach()) * lambda_l2_st
+            log_vars['loss_l2_source_target'] = l2_loss_st.item()
+            target_loss = target_loss + l2_loss_st
+        """
+        # --- new fine 2.1 ---
+        # --- new inizio 2.2 ---
+        # Pesiamo lambda a 0.1
+
+        lambda_l2_rgb_st = self.train_cfg.get('lambda_l2_rgb_st', 0.0)
+        lambda_l2_events_st = self.train_cfg.get('lambda_l2_events_st', 0.0)
+
+        # NB: f_image e f_events sono liste di feature maps -> prendiamo ultimo livello [-1]
+        if (lambda_l2_rgb_st > 0 or lambda_l2_events_st > 0) and tgt_feat is not None:
+            f_src_img = src_feat['f_image'][-1]    # features immagine source (giorno)
+            f_tgt_img = tgt_feat['f_image'][-1]    # features immagine target (notte)
+
+            f_src_evt = src_feat['f_events'][-1]   # features eventi source (giorno)
+            f_tgt_evt = tgt_feat['f_events'][-1]   # features eventi target (notte)
+
+            # 1) L2 tra immagine source e immagine target
+            if lambda_l2_rgb_st > 0 and f_src_img is not None and f_tgt_img is not None:
+                # detach sul source: così il gradiente fluisce solo dal target
+                l2_loss_rgb_st = F.mse_loss(f_tgt_img, f_src_img.detach()) * lambda_l2_rgb_st
+                log_vars['L2_loss_RGB_st'] = l2_loss_rgb_st.item()
+                target_loss = target_loss + l2_loss_rgb_st
+
+            # 2) L2 tra eventi source e eventi target
+            if lambda_l2_events_st > 0 and f_src_evt is not None and f_tgt_evt is not None:
+                # detach sul source: così il gradiente fluisce solo dal target
+                l2_loss_events_st = F.mse_loss(f_tgt_evt, f_src_evt.detach()) * lambda_l2_events_st
+                log_vars['L2_loss_EVENTS_st'] = l2_loss_events_st.item()
+                target_loss = target_loss + l2_loss_events_st
+            
+        # --- new fine 2.2 ---
+
         target_loss.backward()
 
         ################################################################
@@ -1026,38 +954,24 @@ class DACS(UDADecoratorFusion):
                 mix_img_softmax = torch.softmax(pred, dim=1)  # img
                 _, mix_img_seg = torch.max(mix_img_softmax, dim=1)
             else:
-                mix_img_output = pred.get('image_output', None)
-                mix_img_softmax = None
-                if mix_img_output is not None:
-                    mix_img_softmax = torch.softmax(mix_img_output, dim=1) # img
-                    _, mix_img_seg = torch.max(mix_img_softmax, dim=1)
-                mix_events_output = pred.get('events_output', None)
-                mix_events_softmax = None
-                if mix_events_output is not None:
-                    mix_events_softmax = torch.softmax(mix_events_output, dim=1) # events
-                    _, mix_events_seg = torch.max(mix_events_softmax, dim=1)
+                mix_img_softmax = torch.softmax(pred['image_output'], dim=1)  # img
+                _, mix_img_seg = torch.max(mix_img_softmax, dim=1)
+                mix_events_softmax = torch.softmax(pred['events_output'], dim=1)  # events
+                _, mix_events_seg = torch.max(mix_events_softmax, dim=1)
                 if self.train_type not in {'cs2dz_image+d2n-isr', 'cs2dz_image+raw-isr_split', 'cs2dz_image+raw-isr_no-fusion'}:
                     if not self.isr_no_fusion or self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres:  # events
-                        mix_fusion_output = pred.get('fusion_output', None)
-                        mix_fusion_softmax = None
-                        if mix_fusion_output is not None:
-                            mix_fusion_softmax = torch.softmax(mix_fusion_output, dim=1) # fusion
-                            _, mix_fusion_seg = torch.max(mix_fusion_softmax, dim=1)
+                        mix_fusion_softmax = torch.softmax(pred['fusion_output'], dim=1)  # fusion
+                        _, mix_fusion_seg = torch.max(mix_fusion_softmax, dim=1)
                 if self.train_type == 'cs2dsec_image+events_together':
-                    mix_isr_output = pred.get('img_self_res_output', None)
-                    mix_isr_softmax = None
-                    if mix_isr_output is not None:
-                        mix_isr_softmax = torch.softmax(mix_isr_output, dim=1) # fusion
-                        _, mix_isr_seg = torch.max(mix_isr_softmax, dim=1)
+                    mix_isr_softmax = torch.softmax(pred['img_self_res_output'], dim=1)  # fusion
+                    _, mix_isr_seg = torch.max(mix_isr_softmax, dim=1)
 
         if self.local_iter % self.debug_img_interval == 0:
             out_dir = os.path.join(self.train_cfg['work_dir'], 'class_mix_debug')
             os.makedirs(out_dir, exist_ok=True)
 
             if day_image is None:
-                vis_img = None
-                if day_events is not None:
-                    vis_img = torch.clamp(torch.mean((day_events + 1) / 2, dim=1, keepdim=True).repeat(1, 3, 1, 1), 0, 1)
+                vis_img = torch.clamp(torch.mean((day_events + 1) / 2, dim=1, keepdim=True).repeat(1, 3, 1, 1), 0, 1)
                 vis_trg_img = vis_img
                 vis_mixed_img = vis_img
             else:
@@ -1079,20 +993,9 @@ class DACS(UDADecoratorFusion):
                 vis_day_isr = torch.clamp((target_day_t_isr + 1) / 2, 0, 1)
                 vis_night_isr = torch.clamp((night_isr + 1) / 2, 0, 1)
             elif self.train_type in {'cs2dsec_image+events', 'cs2dsec_image+events_together'}:
-                vis_day_isr = None
-                if day_isr is not None:
-                    vis_day_isr = torch.clamp((day_isr + 1) / 2, 0, 1)
-                # vis_day_isr = torch.clamp((day_isr + 1) / 2, 0, 1)
-
-                vis_night_isr = None
-                if night_isr is not None:
-                    vis_night_isr = torch.clamp((night_isr + 1) / 2, 0, 1)
-                # vis_night_isr = torch.clamp((night_isr + 1) / 2, 0, 1)
-
-                vis_mixed_isr = None
-                if mixed_isr is not None:
-                    vis_mixed_isr = torch.clamp((mixed_isr + 1) / 2, 0, 1)
-                # vis_mixed_isr = torch.clamp((mixed_isr + 1) / 2, 0, 1)
+                vis_day_isr = torch.clamp((day_isr + 1) / 2, 0, 1)
+                vis_night_isr = torch.clamp((night_isr + 1) / 2, 0, 1)
+                vis_mixed_isr = torch.clamp((mixed_isr + 1) / 2, 0, 1)
             elif self.train_type in {'cs2dz_image+raw-isr', 'cs2dz_image+raw-isr_split', 'cs2dz_image+raw-isr_no-fusion'}:
                 vis_day_isr = torch.clamp((day_isr + 1) / 2, 0, 1)
                 vis_night_isr = torch.clamp((night_isr + 1) / 2, 0, 1)
@@ -1192,8 +1095,7 @@ class DACS(UDADecoratorFusion):
                         subplotimg(axs[3][1], vis_night_isr_deflare[j], 'Target ISR_deflare', cmap='gray')
                 elif self.train_type == 'cs2dsec_image+events_together':
 
-                    # La logica per le didascalie rimane la stessa
-                    if self.forward_cfg.get('isr_events_fusion_choice', 0.5) > self.random_choice_thres:
+                    if self.forward_cfg['isr_events_fusion_choice'] > self.random_choice_thres:  # events
                         source_caption = 'Source Fusion(I+E) Seg'
                         target_caption = 'Target Fusion(I+E) Seg'
                         mix_caption = 'Mixed Fusion(I+E) Seg'
@@ -1202,54 +1104,33 @@ class DACS(UDADecoratorFusion):
                         target_caption = 'Target Fusion(I+SF) Seg'
                         mix_caption = 'Mixed Fusion(I+SF) Seg'
 
-                    # Aggiungiamo controlli per disegnare solo se i dati esistono
-                    # Riga 0: Source
                     subplotimg(axs[0][0], vis_img[j], 'Source Image')
-                    if vis_events is not None:
-                        subplotimg(axs[0][1], vis_events[j], 'Source Events')
-                    if day_img_seg is not None:
-                        subplotimg(axs[0][2], day_img_seg[j], 'Source Image Seg', cmap='cityscapes')
-                    if day_events_seg is not None:
-                        subplotimg(axs[0][3], day_events_seg[j], 'Source Events Seg', cmap='cityscapes')
-                    if day_fusion_seg is not None:
-                        subplotimg(axs[0][4], day_fusion_seg[j], source_caption, cmap='cityscapes')
+                    subplotimg(axs[0][1], vis_events[j], 'Source Events')
+                    subplotimg(axs[0][2], day_img_seg[j], 'Source Image Seg', cmap='cityscapes')
+                    subplotimg(axs[0][3], day_events_seg[j], 'Source Events Seg', cmap='cityscapes')
+                    subplotimg(axs[0][4], day_fusion_seg[j], source_caption, cmap='cityscapes')
                     subplotimg(axs[0][5], day_label[j], 'Source GT Seg', cmap='cityscapes')
 
-                    # Riga 1: Target
                     subplotimg(axs[1][0], vis_trg_img[j], 'Target Image')
-                    if vis_trg_events is not None:
-                        subplotimg(axs[1][1], vis_trg_events[j], 'Target Events')
-                    if 'ema_img_seg' in locals() and ema_img_seg is not None:
-                        subplotimg(axs[1][2], ema_img_seg[j], 'Target Image Seg', cmap='cityscapes')
-                    if 'ema_events_seg' in locals() and ema_events_seg is not None:
-                        subplotimg(axs[1][3], ema_events_seg[j], 'Target Events Seg', cmap='cityscapes')
-                    if pseudo_label_f is not None:
-                        subplotimg(axs[1][4], pseudo_label_f[j], target_caption, cmap='cityscapes')
+                    subplotimg(axs[1][1], vis_trg_events[j], 'Target Events')
+                    subplotimg(axs[1][2], ema_img_seg[j], 'Target Image Seg', cmap='cityscapes')
+                    subplotimg(axs[1][3], ema_events_seg[j], 'Target Events Seg', cmap='cityscapes')
+                    subplotimg(axs[1][4], pseudo_label_f[j], target_caption, cmap='cityscapes')
                     subplotimg(axs[1][5], mix_masks[j][0], 'Domain Mask', cmap='gray')
 
-                    # Riga 2: Mixed
                     subplotimg(axs[2][0], vis_mixed_img[j], 'Mixed Image')
-                    if vis_mixed_events is not None:
-                        subplotimg(axs[2][1], vis_mixed_events[j], 'Mixed Events')
-                    if 'mix_img_seg' in locals() and mix_img_seg is not None:
-                        subplotimg(axs[2][2], mix_img_seg[j], 'Mixed Image Seg', cmap='cityscapes')
-                    if 'mix_events_seg' in locals() and mix_events_seg is not None:
-                        subplotimg(axs[2][3], mix_events_seg[j], 'Mixed Events Seg', cmap='cityscapes')
-                    if 'mix_fusion_seg' in locals() and mix_fusion_seg is not None:
-                        subplotimg(axs[2][4], mix_fusion_seg[j], mix_caption, cmap='cityscapes')
+                    subplotimg(axs[2][1], vis_mixed_events[j], 'Mixed Events')
+                    subplotimg(axs[2][2], mix_img_seg[j], 'Mixed Image Seg', cmap='cityscapes')
+                    subplotimg(axs[2][3], mix_events_seg[j], 'Mixed Events Seg', cmap='cityscapes')
+                    subplotimg(axs[2][4], mix_fusion_seg[j], mix_caption, cmap='cityscapes')
                     subplotimg(axs[2][5], mixed_lbl[j], 'Mixed PL Seg (PL)', cmap='cityscapes')
 
-                    # Riga 3: Self-Resolved (ISR)
-                    if vis_day_isr is not None:
-                        subplotimg(axs[3][0], vis_day_isr[j], 'Source img_self_res')
-                    if day_isr_seg is not None:
-                        subplotimg(axs[3][1], day_isr_seg[j], 'Source img_self_res Seg', cmap='cityscapes')
-                    if vis_night_isr is not None:
-                        subplotimg(axs[3][2], vis_night_isr[j], 'Target img_self_res')
-                    if vis_mixed_isr is not None:
-                        subplotimg(axs[3][4], vis_mixed_isr[j], 'Mixed img_self_res')
-                    if 'mix_isr_seg' in locals() and mix_isr_seg is not None:
-                        subplotimg(axs[3][5], mix_isr_seg[j], 'Mixed img_self_res Seg', cmap='cityscapes')
+                    subplotimg(axs[3][0], vis_day_isr[j], 'Source img_self_res')
+                    subplotimg(axs[3][1], day_isr_seg[j], 'Source img_self_res Seg', cmap='cityscapes')
+                    subplotimg(axs[3][2], vis_night_isr[j], 'Target img_self_res')
+                    # subplotimg(axs[3][3], ema_isr_seg[j], 'Target img_self_res Seg', cmap='cityscapes')
+                    subplotimg(axs[3][4], vis_mixed_isr[j], 'Mixed img_self_res')
+                    subplotimg(axs[3][5], mix_isr_seg[j], 'Mixed img_self_res Seg', cmap='cityscapes')
                 else:
                     assert self.train_type == 'cs2dsec_image+events'
 
@@ -1397,16 +1278,6 @@ class OrgDACS(UDADecorator):
                 averaging the logs.
         """
 
-        # --- INIZIO BLOCCO DI DEBUG DA AGGIUNGERE ---
-        print("\n--- DEBUG: CONTENUTO DEL BATCH DAL DATALOADER ---")
-        print(f"Chiavi principali del batch: {data_batch.keys()}")
-        if 'target' in data_batch:
-            print(f"Chiavi nel batch TARGET: {data_batch['target'].keys()}")
-        else:
-            print("Nessun dato 'target' trovato nel batch.")
-        print("--------------------------------------------------\n")
-        # --- FINE BLOCCO DI DEBUG ---
-        
         optimizer.zero_grad()
         log_vars = self(**data_batch)
         optimizer.step()

@@ -1,0 +1,17 @@
+Analisi del file: 000658.npy
+Data analisi: 2025-09-08 16:55:49
+Path originale: ./data/DSEC_Night/zurich_city_09_c/events/events_vg/000658.npy
+Path output: ./risultati_analisi/
+==================================================
+Shape originale: (1, 1, 480, 640)
+Shape dopo squeeze: (480, 640)
+Tipo dati: float32
+Valore minimo: -1.000000
+Valore massimo: 1.000000
+Media: -0.043050
+Deviazione standard: 0.394978
+==================================================
+File creati:
+- Normalizzato: 000658_normalized.npy
+- Immagine: 000658_visualization.png
+- Metadati: 000658_info.txt

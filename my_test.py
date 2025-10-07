@@ -12,7 +12,9 @@ if __name__ == '__main__':
 
     # work_dirs = ['work_dirs/local-basic/230221_1646_cs2dz_image+raw-isr_SharedD_L07_C01_b5_896f6']
 
-    test_output_type = 'image'
+    test_output_type = 'image' # 'fusion', 'events', 'image'
+    #test_output_type = 'events' # 'fusion', 'events', 'image'
+    #test_output_type = 'fusion' # 'fusion', 'events', 'image'
     # python -m tools.test ${CONFIG_FILE} ${CHECKPOINT_FILE} --show-dir ${SHOW_DIR} --test_output_type ${TEST_OUTPUT_TYPE}
 
     config_file = opt.work_dir + '/' + opt.work_dir.split('/')[-1].split('[')[0] + '.json'
