@@ -40,9 +40,9 @@ Le **loss L2** introdotte nei differenti esperimenti e testate sono le seguenti 
 - <span style="color:skyblue">L2 loss tra *RGB features source e RGB features target*</span> &&
   <span style="color:green">L2 loss tra *EVENT features source e EVENT features target*</span>. 🔵🟩
 
-| <img src="resources/CMDA-ARC_0.jpg" width="450"/> | <img src="resources/CMDA-ARC_1.jpg" width="450"/> | <img src="resources/CMDA-ARC_2.jpg" width="450"/> | 
+| <img src="resources/CMDA-ARC_0.jpeg" width="500"/> | <img src="resources/CMDA-ARC_1.jpeg" width="500"/> | <img src="resources/CMDA-ARC_2.jpeg" width="500"/> |
 |:-------------------------------------------:|:-------------------------------------------:|:-------------------------------------------:|
-| <img src="resources/CMDA-ARC_3.jpg" width="450"/> | <img src="resources/CMDA-ARC_4.jpg" width="450"/> | <img src="resources/CMDA-ARC_5.jpg" width="450"/> |
+| <img src="resources/CMDA-ARC_3.jpeg" width="500"/> | <img src="resources/CMDA-ARC_4.jpeg" width="500"/> | <img src="resources/CMDA-ARC_5.jpeg" width="500"/> |
 
 
 
