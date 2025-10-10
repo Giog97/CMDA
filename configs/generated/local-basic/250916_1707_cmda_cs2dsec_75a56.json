@@ -1,0 +1,87 @@
+{
+    "_base_": "../../fusion/cs2dsec_image+events_together_b2.py",
+    "name": "250916_1707_cmda_cs2dsec_75a56",
+    "work_dir": "work_dirs/local-basic/250916_1707_cmda_cs2dsec_75a56",
+    "git_rev": "1cc0005de1236ea89fa507b6446c6989e1be1c33",
+    "model": {
+        "pretrained": "pretrained/mit_b2.pth",
+        "backbone_image": {
+            "type": "mit_b2"
+        },
+        "backbone_events": {
+            "type": "mit_b2"
+        },
+        "fusion_module": {
+            "type": "AttentionAvgFusion"
+        },
+        "fusion_isr_module": {
+            "type": ""
+        },
+        "decode_head": {
+            "decoder_params": {
+                "share_decoder": true,
+                "half_share_decoder": false
+            }
+        }
+    },
+    "uda": {
+        "debug_img_interval": 500,
+        "cyclegan_itrd2en_path": "./pretrained/cityscapes_ICD_to_dsec_EN.pth",
+        "pseudo_weight_ignore_top": 0,
+        "pseudo_weight_ignore_bottom": 0,
+        "imnet_feature_dist_lambda": 0,
+        "isr_mix_aug": false,
+        "sky_mask": null,
+        "deflare_aug": false,
+        "isr_edge": false,
+        "lambda_isr_features": -1,
+        "isr_edge_class_weight": -1,
+        "mixed_image_to_mixed_isr": true,
+        "isr_noise_dacs_type": "",
+        "shift_3_channel": false,
+        "isr_parms": {
+            "val_range": [
+                0.01,
+                1.01
+            ],
+            "_threshold": 0.005,
+            "_clip_range": 0.1,
+            "shift_pixel": 1
+        },
+        "isr_no_fusion": false,
+        "lambda_feature_consistency": -1,
+        "isr_another_fusion": false,
+        "random_choice_thres": "0.5",
+        "shift_type": "random",
+        "without_events": false,
+        "without_isd": false,
+        "fuse_both_ice_and_e": false,
+        "forward_cfg": {
+            "loss_weight": {
+                "image": 0.5,
+                "events": 0.5,
+                "fusion": 0.5,
+                "img_self_res": 0.25
+            }
+        }
+    },
+    "evaluation": {
+        "interval": 400
+    },
+    "data": {
+        "samples_per_gpu": 1,
+        "workers_per_gpu": 4,
+        "train": {
+            "type": "UDADataset",
+            "source": {
+                "type": "CityscapesICDataset",
+                "image_resize_size": [
+                    1024,
+                    512
+                ],
+                "image_crop_size": [
+                    512,
+                    512
+                ],
+                "dataset_path": "/home/ubuntu/XRH/city-scapes-script-master/cityscapes_dataset/",
+                "outputs": 

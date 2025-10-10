@@ -818,7 +818,7 @@ loss_events = data['L2_loss_EVENTs_RGBt']
 # Crea il grafico
 plt.figure(figsize=(14, 8))
 plt.plot(iterazioni, loss_rgb, marker='.', linestyle='-', color='dodgerblue', label='L2_loss_RGB_st')
-plt.plot(iterazioni, loss_events, marker='.', linestyle='-', color='blue', label='L2_loss_EVENTs_RGBt')
+plt.plot(iterazioni, loss_events, marker='.', linestyle='-', color='darkblue', label='L2_loss_EVENTs_RGBt')
 
 # Aggiunge titoli, etichette e legenda per chiarezza
 plt.title('Andamento comparativo delle Loss', fontsize=16)

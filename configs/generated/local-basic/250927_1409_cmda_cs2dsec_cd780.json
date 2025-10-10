@@ -1,0 +1,139 @@
+{
+    "_base_": "../../fusion/cs2dsec_image+events_together_b2.py",
+    "name": "250927_1409_cmda_cs2dsec_cd780",
+    "work_dir": "work_dirs/local-basic/250927_1409_cmda_cs2dsec_cd780",
+    "git_rev": "67d3aae012bf3689c15cd7a4f516a69c7610ff9c",
+    "model": {
+        "pretrained": "pretrained/mit_b2.pth",
+        "backbone_image": {
+            "type": "mit_b2"
+        },
+        "backbone_events": {
+            "type": "mit_b2"
+        },
+        "fusion_module": {
+            "type": "AttentionAvgFusion"
+        },
+        "fusion_isr_module": {
+            "type": ""
+        },
+        "decode_head": {
+            "decoder_params": {
+                "share_decoder": true,
+                "half_share_decoder": false
+            }
+        }
+    },
+    "uda": {
+        "debug_img_interval": 500,
+        "cyclegan_itrd2en_path": "./pretrained/cityscapes_ICD_to_dsec_EN.pth",
+        "pseudo_weight_ignore_top": 0,
+        "pseudo_weight_ignore_bottom": 0,
+        "imnet_feature_dist_lambda": 0,
+        "isr_mix_aug": false,
+        "sky_mask": null,
+        "deflare_aug": false,
+        "isr_edge": false,
+        "lambda_isr_features": -1,
+        "isr_edge_class_weight": -1,
+        "mixed_image_to_mixed_isr": true,
+        "isr_noise_dacs_type": "",
+        "shift_3_channel": false,
+        "isr_parms": {
+            "val_range": [
+                0.01,
+                1.01
+            ],
+            "_threshold": 0.005,
+            "_clip_range": 0.1,
+            "shift_pixel": 1
+        },
+        "isr_no_fusion": false,
+        "lambda_feature_consistency": -1,
+        "isr_another_fusion": false,
+        "random_choice_thres": "0.5",
+        "shift_type": "random",
+        "without_events": false,
+        "without_isd": false,
+        "fuse_both_ice_and_e": false,
+        "forward_cfg": {
+            "loss_weight": {
+                "image": 0.5,
+                "events": 0.5,
+                "fusion": 0.5,
+                "img_self_res": 0.25
+            }
+        }
+    },
+    "evaluation": {
+        "interval": 4000
+    },
+    "data": {
+        "samples_per_gpu": 1,
+        "train": {
+            "source": {
+                "return_GI_or_IC": "image_change",
+                "image_crop_size": [
+                    512,
+                    512
+                ],
+                "dataset_path": "./data/cityscapes/",
+                "isr_noise": false,
+                "isr_cow_mask": false,
+                "high_resolution_isr": false,
+                "random_flare": null,
+                "cs_isr_data_type": "day",
+                "shift_3_channel": false,
+                "isr_parms": "",
+                "shift_type": "random"
+            },
+            "target": {
+                "crop_size": [
+                    400,
+                    400
+                ],
+                "after_crop_resize_size": [
+                    512,
+                    512
+                ],
+                "events_clip_range": null,
+                "events_bins_5_avg_1": false,
+                "image_change_range": 1,
+                "isr_parms": {
+                    "val_range": [
+                        0.01,
+                        1.01
+                    ],
+                    "_threshold": 0.005,
+                    "_clip_range": 0.1,
+                    "shift_pixel": 1
+                },
+                "shift_type": "random"
+            },
+            "source_json_root": "./data/cityscapes/"
+        },
+        "val": {
+            "events_clip_range": null,
+            "events_bins_5_avg_1": false,
+            "image_change_range": 1,
+            "outputs": [
+                "warp_image",
+                "label",
+                "events_vg",
+                "img_metas"
+            ]
+        },
+        "test": {
+            "events_clip_range": null,
+            "events_bins_5_avg_1": false,
+            "image_change_range": 1,
+            "outputs": [
+                "warp_image",
+                "label",
+                "events_vg",
+                "img_metas"
+            ]
+        }
+    },
+    "seed": 0
+}
