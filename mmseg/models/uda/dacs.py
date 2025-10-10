@@ -903,6 +903,7 @@ class DACS(UDADecoratorFusion):
 
         # --- new inizio 2.1 ---
         """ 
+        # L2 Loss su features FUSION source-target
         # Disabilitata L2 loss source-target domain features
         lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
         if lambda_l2_st > 0:

@@ -902,6 +902,7 @@ class DACS(UDADecoratorFusion):
         target_loss = mix_loss
 
         # --- new inizio 2 ---
+        # L2 Loss su features FUSION source-target
         lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
         if lambda_l2_st > 0:
             f_src = src_feat['f_fusion'][-1]   # o f_image/f_events a seconda di cosa vogliamo
