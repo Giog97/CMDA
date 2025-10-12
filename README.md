@@ -270,3 +270,7 @@ Furthermore, we wish to express our gratitude to the researchers and PhD student
 - Lorenzo Berlincioni
 
 A special thanks also goes to our trusted companion ***harlock*** ... you were the best dream machine we could wish for!
+
+
+### For more information
+If you want more information look at our presentation [here](https://drive.google.com/drive/folders/1TvRxqjTNaL65_qcCUCSOSDOJHtc0KT-S?usp=sharing).
