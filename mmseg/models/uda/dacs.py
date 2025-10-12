@@ -933,43 +933,49 @@ class DACS(UDADecoratorFusion):
         def masked_l2_loss(f1, f2, event_mask, patch_ratio=0.6, patch_size=16, event_thresh=0.05):
             """
             Calcola la L2 loss solo sulle regioni dove la mappa eventi ha segnale sufficiente.
-            - f1, f2: feature maps [B, C, H, W]
+            - f1, f2: feature maps [B, C, H, W] --> f1 = target, f2 = source (detach)
             - event_mask: tensore eventi [B, 3, H_event, W_event]
             - patch_ratio: % minima di pixel attivi per considerare una patch valida
             - patch_size: lato della patch (es. 16 -> patch 16x16)
-            - event_thresh: soglia di attivazione per considerare un pixel "attivo"
+            - event_thresh: soglia di attivazione per considerare un pixel "attivo" --> per togliere il rumore di fondo
             Ritorna:
-                loss (tensor), active_ratio (float)
+                loss (tensor), active_ratio (float) --> percentuale di patch attive sul batch
             """
-            # 1. Riduci a singolo canale (massimo sui 3)
+            # 1. Riduci a singolo canale (massimo sui 3). se event_mask ha 3 canali prende il massimo su canale.
+            # Serve perché la mask può essere RGB.
             if event_mask.shape[1] > 1:
                 event_mask = event_mask.abs().max(dim=1, keepdim=True)[0]
 
             # 2. Interpola alle dimensioni delle feature
+            # porta la event_mask alla stessa risoluzione spaziale di f1/f2 con nearest (eviti interpolazioni continue che cambiano binarità).
             if event_mask.shape[-2:] != f1.shape[-2:]:
                 event_mask = F.interpolate(event_mask, size=f1.shape[-2:], mode='nearest')
 
             # 3. Binarizza la mappa eventi (1 = attivo, 0 = spento)
-            event_mask = (event_mask > event_thresh).float()
+            event_mask = (event_mask > event_thresh).float() # Binarizzazione -> mappa 0/1 dei pixel attivi.
 
-            # 4. Calcola densità patch attive
+            # 4. Calcola densità patch attive --> calcola percentuale px attivi in ogni patch
             if patch_size > 1:
+                # Se patch_size>1 convolve la mask binaria con un kernel patch_size x patch_size con stride=patch_size. 
+                # Questo produce una griglia di patch non sovrapposte: ogni valore è il conteggio dei pixel attivi nella patch.
                 kernel = torch.ones((1, 1, patch_size, patch_size), device=event_mask.device)
                 density = F.conv2d(event_mask, kernel, stride=patch_size, padding=0)
                 density = density / (patch_size * patch_size)
-                active_patches = (density > patch_ratio).float()
+                # Normalizza per l’area patch e confronta con patch_ratio, ottenendo active_patches (griglia patch attive).
+                active_patches = (density > patch_ratio).float() # Ri-upsample active_patches alla dimensione delle feature (patch_mask) per poter moltiplicare elemento-per-elemento con le feature.
                 patch_mask = F.interpolate(active_patches, size=f1.shape[-2:], mode='nearest')
             else:
+                # Se patch_size==1 la patch_mask è semplicemente event_mask.
                 patch_mask = event_mask
 
             # 5. Percentuale di patch attive sul batch
             total_patches = patch_mask.numel()
-            active_ratio = (patch_mask.sum() / total_patches).item()
+            active_ratio = (patch_mask.sum() / total_patches).item() # percentuale di patch attive
 
             # 6. Calcola L2 solo dove mask == 1
             diff = (f1 - f2) ** 2
             masked_diff = diff * patch_mask
-            valid = patch_mask.sum()
+            valid = patch_mask.sum() # numero di elementi validi cioè attivi (dove patch_mask==1)
 
             if valid.item() == 0:
                 return torch.tensor(0.0, device=f1.device), active_ratio
@@ -995,6 +1001,7 @@ class DACS(UDADecoratorFusion):
                     event_mask=night_events,   # usa eventi notturni come riferimento
                     patch_ratio=0.6, patch_size=16
                 )
+                # NB: night_events è la mappa eventi fornita dal dataloader per il target (notturno). È ciò che usiamo come segnale di dove ci sono eventi per decidere su quali patch applicare la L2.
 
                 if l2_loss_rgb_st.item() > 0:
                     l2_loss_rgb_st = l2_loss_rgb_st * lambda_l2_rgb_st
