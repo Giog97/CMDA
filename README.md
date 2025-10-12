@@ -65,6 +65,7 @@ The files containing the various experiment implementations that modify dacs.py 
 - './mmseg/models/uda/dacs_L2_RGBst_L2_EVENTst.py' 🔵🟩
 - './mmseg/models/uda/dacs_solo_L2_sourcetarget_fusion.py' 💜
 - './mmseg/models/uda/dacs_loss_L2_sourcedomain.py' 🔴
+- './mmseg/models/uda/dacs_L2_RGBst_L2_EVENTsRGBt_MaskedEvent.py'🔵🟦🎭
 
 
 

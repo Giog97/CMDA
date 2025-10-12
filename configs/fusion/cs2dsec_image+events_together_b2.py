@@ -45,7 +45,7 @@ model = dict(
     # === Parametri 'lambda' per le nuove loss ===
     #train_cfg=dict( # --> aggiunto questa lambda viene usata in dacs.py per pesare la loss L2 sul source domain
         #lambda_l2=0.1,  # peso della loss di L2 nel source domain giorno tra RGB e Events --> rimosso perchè cattive performance
-        #lambda_l2_st=0.1   # nuova loss source-target
+        #lambda_l2_st=0.1   # nuova loss FUSION source-target
     #),
     # Train - Test1:
     #train_cfg = dict(
@@ -53,9 +53,15 @@ model = dict(
     #    lambda_l2_events_rgbt=0.05    # peso loss L2 Events(source)-RGB(target)
     #),
     # Train - Test2:
+    #train_cfg = dict(
+    #    lambda_l2_rgb_st=0.1,     # peso per la L2 immagine giorno/notte
+    #    lambda_l2_events_st=0.05  # peso per la L2 eventi giorno/notte
+    #),
+    # Train - Test3:
     train_cfg = dict(
-        lambda_l2_rgb_st=0.1,     # peso per la L2 immagine giorno/notte
-        lambda_l2_events_st=0.05  # peso per la L2 eventi giorno/notte
+        lambda_l2_st=0.1,             # peso loss L2 FUSION source-target
+        lambda_l2_rgb_st=0.1,         # peso loss L2 RGB source-target
+        lambda_l2_events_rgbt=0.05    # peso loss L2 Events(source)-RGB(target)
     ),
 )
 

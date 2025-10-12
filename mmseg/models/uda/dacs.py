@@ -1,5 +1,6 @@
 # Implementata L2 loss tra features immagine RGB e features eventi sul source domain (giorno)
-# Test2 --> ricordati di modificare anche il file di config per attivare la loss L2 (ovvero inserire lambda giusti)
+# Test3 --> ricordati di modificare anche il file di config (./configs/fusion/cs2dsec_image+events_together_b2.py) per attivare la loss L2 (ovvero inserire lambda giusti)
+# Test3: Loss  L2 tra RGBst & L2 tra EVENTs_RGBt [& L2 tra FUSIONst --> inizialmente disattivata vediamo se attivarla]
 # The ema model and the domain-mixing are based on:
 # https://github.com/vikolss/DACS
 
@@ -31,7 +32,6 @@ from mmseg.models.uda.prototype_contrast import ContrastCELoss
 import torch.nn.functional as F #aggiunto per usare loss l2 (mse)
 
 plt.switch_backend('agg')
-
 
 def _params_equal(ema_model, model):
     for ema_param, param in zip(ema_model.named_parameters(),
@@ -901,10 +901,11 @@ class DACS(UDADecoratorFusion):
         # log_vars = dict_keys(['decode.loss_seg', 'decode.acc_seg', 'loss', 'mix.decode.loss_seg', 'mix.decode.acc_seg'])
         target_loss = mix_loss
 
+        # === Test3: Loss L2 tra features FUSIONst & L2 tra RGBst & L2 tra EVENTs_RGBt ===
         # --- new inizio 2.1 ---
-        """ 
+        """
+        # Inizialmente disattivata - ma probabilmente meglio tenerla attiva
         # L2 Loss su features FUSION source-target
-        # Disabilitata L2 loss source-target domain features
         lambda_l2_st = self.train_cfg.get('lambda_l2_st', 0.0)
         if lambda_l2_st > 0:
             f_src = src_feat['f_fusion'][-1]   # o f_image/f_events a seconda di cosa vogliamo
@@ -915,37 +916,111 @@ class DACS(UDADecoratorFusion):
             target_loss = target_loss + l2_loss_st
         """
         # --- new fine 2.1 ---
+
+        # day_events
+        #day_image = kwargs['source']['image']
+        #night_image = kwargs['target']['warp_image'] day_events, night_events
+        #night_events = kwargs['target']['events_vg']
+
+        # Io voglio che night_events sia quello di riferimento che mi dice se posso applicare la L2 loss
         # --- new inizio 2.2 ---
-        # Pesiamo lambda a 0.1
-
+        # === L2 Loss condizionata agli eventi notturni ===
         lambda_l2_rgb_st = self.train_cfg.get('lambda_l2_rgb_st', 0.0)
-        lambda_l2_events_st = self.train_cfg.get('lambda_l2_events_st', 0.0)
+        lambda_l2_events_rgbt = self.train_cfg.get('lambda_l2_events_rgbt', 0.0)
 
-        # NB: f_image e f_events sono liste di feature maps -> prendiamo ultimo livello [-1]
-        if (lambda_l2_rgb_st > 0 or lambda_l2_events_st > 0) and tgt_feat is not None:
+        # === Helper: L2 loss mascherata sugli eventi ===
+        # Calcola una MSE “mascherata” usando soltanto le patch in cui la mappa eventi (event_mask) è abbastanza attiva.
+        def masked_l2_loss(f1, f2, event_mask, patch_ratio=0.6, patch_size=16, event_thresh=0.05):
+            """
+            Calcola la L2 loss solo sulle regioni dove la mappa eventi ha segnale sufficiente.
+            - f1, f2: feature maps [B, C, H, W]
+            - event_mask: tensore eventi [B, 3, H_event, W_event]
+            - patch_ratio: % minima di pixel attivi per considerare una patch valida
+            - patch_size: lato della patch (es. 16 -> patch 16x16)
+            - event_thresh: soglia di attivazione per considerare un pixel "attivo"
+            Ritorna:
+                loss (tensor), active_ratio (float)
+            """
+            # 1. Riduci a singolo canale (massimo sui 3)
+            if event_mask.shape[1] > 1:
+                event_mask = event_mask.abs().max(dim=1, keepdim=True)[0]
+
+            # 2. Interpola alle dimensioni delle feature
+            if event_mask.shape[-2:] != f1.shape[-2:]:
+                event_mask = F.interpolate(event_mask, size=f1.shape[-2:], mode='nearest')
+
+            # 3. Binarizza la mappa eventi (1 = attivo, 0 = spento)
+            event_mask = (event_mask > event_thresh).float()
+
+            # 4. Calcola densità patch attive
+            if patch_size > 1:
+                kernel = torch.ones((1, 1, patch_size, patch_size), device=event_mask.device)
+                density = F.conv2d(event_mask, kernel, stride=patch_size, padding=0)
+                density = density / (patch_size * patch_size)
+                active_patches = (density > patch_ratio).float()
+                patch_mask = F.interpolate(active_patches, size=f1.shape[-2:], mode='nearest')
+            else:
+                patch_mask = event_mask
+
+            # 5. Percentuale di patch attive sul batch
+            total_patches = patch_mask.numel()
+            active_ratio = (patch_mask.sum() / total_patches).item()
+
+            # 6. Calcola L2 solo dove mask == 1
+            diff = (f1 - f2) ** 2
+            masked_diff = diff * patch_mask
+            valid = patch_mask.sum()
+
+            if valid.item() == 0:
+                return torch.tensor(0.0, device=f1.device), active_ratio
+
+            loss = masked_diff.sum() / valid
+            return loss, active_ratio
+
+
+        # NB: f_image e f_events sono liste di feature maps -> prendiamo l’ultimo livello [-1]
+        if (lambda_l2_rgb_st > 0 or lambda_l2_events_rgbt > 0) and tgt_feat is not None:
             f_src_img = src_feat['f_image'][-1]    # features immagine source (giorno)
+            f_src_evt = src_feat['f_events'][-1]   # features eventi source (giorno)
             f_tgt_img = tgt_feat['f_image'][-1]    # features immagine target (notte)
 
-            f_src_evt = src_feat['f_events'][-1]   # features eventi source (giorno)
-            f_tgt_evt = tgt_feat['f_events'][-1]   # features eventi target (notte)
+            # 🔍 Debug: stampa le shape alla prima iterazione
+            if self.local_iter == 0:
+                print(f"[DEBUG] f_src_img: {f_src_img.shape}, f_src_evt: {f_src_evt.shape}, f_tgt_img: {f_tgt_img.shape}")
 
-            # 1) L2 tra immagine source e immagine target
+            # --- 1) L2 tra immagine source e immagine target ---
             if lambda_l2_rgb_st > 0 and f_src_img is not None and f_tgt_img is not None:
-                # detach sul source: così il gradiente fluisce solo dal target
-                l2_loss_rgb_st = F.mse_loss(f_tgt_img, f_src_img.detach()) * lambda_l2_rgb_st
-                log_vars['L2_loss_RGB_st'] = l2_loss_rgb_st.item()
-                target_loss = target_loss + l2_loss_rgb_st
+                l2_loss_rgb_st, active_ratio_rgb = masked_l2_loss(
+                    f_tgt_img, f_src_img.detach(),
+                    event_mask=night_events,   # usa eventi notturni come riferimento
+                    patch_ratio=0.6, patch_size=16
+                )
 
-            # 2) L2 tra eventi source e eventi target
-            if lambda_l2_events_st > 0 and f_src_evt is not None and f_tgt_evt is not None:
-                # detach sul source: così il gradiente fluisce solo dal target
-                l2_loss_events_st = F.mse_loss(f_tgt_evt, f_src_evt.detach()) * lambda_l2_events_st
-                log_vars['L2_loss_EVENTS_st'] = l2_loss_events_st.item()
-                target_loss = target_loss + l2_loss_events_st
-            
+                if l2_loss_rgb_st.item() > 0:
+                    l2_loss_rgb_st = l2_loss_rgb_st * lambda_l2_rgb_st
+                    target_loss = target_loss + l2_loss_rgb_st
+                    log_vars['L2_loss_RGB_st'] = l2_loss_rgb_st.item()
+
+                log_vars['active_ratio_RGB'] = active_ratio_rgb
+
+            # --- 2) L2 tra eventi source e immagine target ---
+            if lambda_l2_events_rgbt > 0 and f_src_evt is not None and f_tgt_img is not None:
+                l2_loss_events_rgbt, active_ratio_evt = masked_l2_loss(
+                    f_tgt_img, f_src_evt.detach(),
+                    event_mask=night_events,   # maschera target notturna
+                    patch_ratio=0.6, patch_size=16
+                )
+
+                if l2_loss_events_rgbt.item() > 0:
+                    l2_loss_events_rgbt = l2_loss_events_rgbt * lambda_l2_events_rgbt
+                    target_loss = target_loss + l2_loss_events_rgbt
+                    log_vars['L2_loss_EVENTs_RGBt'] = l2_loss_events_rgbt.item()
+
+                log_vars['active_ratio_EVENTs'] = active_ratio_evt
+
         # --- new fine 2.2 ---
 
-        # Si va addesso a fare il backward della loss totale (mix + L2 loss), in modo che il gradiente fluisca anche sul target
+
         target_loss.backward()
 
         ################################################################
